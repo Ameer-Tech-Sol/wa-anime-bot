@@ -99,6 +99,25 @@ function detectMood(text) {
   return null;
 }
 
+// --- reply post-processing (strip CoT, keep 1–2 sentences) -------------------
+function stripReasoning(s = '') {
+  let out = s;
+  // Remove DeepSeek-style thinking and common analysis blocks
+  out = out.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  out = out.replace(/```(?:analysis|reasoning)[\s\S]*?```/gi, '');
+  out = out.replace(/(?<=^|\n)(?:Reasoning:|Analysis:|Thoughts?:)[\s\S]*?(?=\n{2,}|$)/gi, '');
+  // Remove “Final Answer:” prefixes if present
+  out = out.replace(/^\s*(?:Final Answer:|Answer:)\s*/i, '');
+  // Remove speaker-name prefixes like "Shahbaz: "
+  out = out.replace(/^[A-Za-z][A-Za-z\s]{0,30}:\s+/, '');
+  return out.trim();
+}
+function clampSentences(s = '', max = 2) {
+  const parts = s.split(/(?<=[.!?])\s+/).filter(Boolean);
+  return parts.slice(0, max).join(' ').trim();
+}
+
+
 // character-specific sticker resolver (with optional fallback)
 function getStickerPath(char, mood) {
   if (!char || !mood) return null;
@@ -123,13 +142,22 @@ async function animeReply(userText) {
     temperature: 0.7,
     max_tokens: 80,
     messages: [
-      { role: 'system', content: sys + "\nKeep every reply very short, 1–3 sentences max." },
+      {
+        role: 'system',
+        content:
+          sys +
+          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
+      },
       { role: 'user', content: userText }
     ]
   });
 
-  return completion.choices?.[0]?.message?.content?.trim() || 'Hmm… say that again?';
+  const raw = completion.choices?.[0]?.message?.content || '';
+  let txt = stripReasoning(raw);
+  txt = clampSentences(txt, 2);
+  return txt || '…';
 }
+
 
 // --- Tenor helper ------------------------------------------------------------
 async function fetchTenorGifUrl(query) {
