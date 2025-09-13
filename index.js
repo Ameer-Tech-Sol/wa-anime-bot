@@ -324,6 +324,85 @@ if (lower.startsWith('.hug')) {
   return;
 }
 
+// --- actions: generic Tenor commands (.wave, .smile, .pat, ...) --------------
+const ALIASES = new Map([
+  ['wave','wave'], ['hi','wave'],
+  ['smile','smile'],
+  ['pat','pat'], ['headpat','pat'],
+  ['sad','sad'], ['cry','sad'],
+  ['laugh','laugh'], ['lol','laugh'],
+  ['punch','punch'], ['bonk','punch'],
+  ['kill','kill'],
+  ['hungry','hungry'],
+  ['naughty','naughty'], ['tease','naughty'],
+  ['thumbsup','thumbsup'], ['thumbs','thumbsup'], ['thumbs-up','thumbsup'], ['like','thumbsup'],
+  ['broken','broken'], ['heartbroken','broken'],
+  ['carcrash','carcrash'], ['car-crash','carcrash'], ['crash','carcrash'],
+  ['fart','fart'],
+  ['kick','kick'],
+  ['fight','fight'],
+  ['morning','morning'], ['gm','morning'],
+  ['midnight','midnight'], ['gn','midnight']
+]);
+
+const ACTIONS = {
+  wave:     { q: 'anime wave',          emoji: '👋' },
+  smile:    { q: 'anime smile',         emoji: '😊' },
+  pat:      { q: 'anime head pat',      emoji: '🫶', needsTarget: true },
+  sad:      { q: 'anime sad',           emoji: '😢' },
+  laugh:    { q: 'anime laugh',         emoji: '😂' },
+  punch:    { q: 'anime punch',         emoji: '👊', needsTarget: true },
+  kill:     { q: 'anime kill',          emoji: '🗡️', needsTarget: true },
+  hungry:   { q: 'anime hungry',        emoji: '🍜' },
+  naughty:  { q: 'anime tease',         emoji: '😏' },
+  thumbsup: { q: 'anime thumbs up',     emoji: '👍' },
+  broken:   { q: 'anime broken heart',  emoji: '💔' },
+  carcrash: { q: 'anime car crash',     emoji: '🚗💥' },
+  fart:     { q: 'anime fart',          emoji: '💨' },
+  kick:     { q: 'anime kick',          emoji: '🦵', needsTarget: true },
+  fight:    { q: 'anime fight',         emoji: '🥊' },
+  morning:  { q: 'anime good morning',  emoji: '🌅' },
+  midnight: { q: 'anime good night',    emoji: '🌙' }
+};
+
+// match ".command" at start (supports hyphens)
+const mCmd = lower.match(/^\.(\w[\w-]*)/);
+if (mCmd) {
+  let cmd = mCmd[1].replace(/-/g, '');       // normalize: "thumbs-up" -> "thumbsup"
+  cmd = ALIASES.get(cmd) || cmd;             // resolve alias
+  const action = ACTIONS[cmd];
+
+  if (action) {
+    // target mention (if provided)
+    const mentionJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const target = mentionJids[0];
+
+    // fetch a GIF/MP4 from Tenor
+    const url = await fetchTenorGifUrl(action.q);
+    if (!url) {
+      await sock.sendMessage(from, { text: `No ${cmd} gif found 😅` }, { quoted: msg });
+      return;
+    }
+
+    const tag = target ? '@' + (target.split('@')[0] || '') : '';
+    const captionBase = `${action.emoji} *${cmd.toUpperCase()}!*`;
+    const caption = action.needsTarget && target ? `${captionBase} ${tag}` : captionBase;
+
+    await sock.sendMessage(
+      from,
+      {
+        video: { url },
+        gifPlayback: true,
+        caption,
+        mentions: (action.needsTarget && target) ? [target] : []
+      },
+      { quoted: msg }
+    );
+    return;
+  }
+}
+
+
 
 
       // normal LLM reply
