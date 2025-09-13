@@ -17,6 +17,29 @@ const activeByChat = new Map(); // default OFF on boot
 function setActive(chatId, on) { activeByChat.set(chatId, on); }
 function isActive(chatId) { return activeByChat.get(chatId) === true; }
 
+// --- Model switcher (Groq) ---------------------------------------------------
+const MODEL_REGISTRY = {
+  'groq-8b': 'llama-3.1-8b-instant',
+  'deepseek-70b': 'deepseek-r1-distill-llama-70b',
+};
+// default active model
+let currentModel = 'groq-8b';
+
+function normalizeModelKey(s) {
+  const k = (s || '').toLowerCase().trim();
+  if (['groq', '8b', 'llama', 'llama-8b', 'groq-8b'].includes(k)) return 'groq-8b';
+  if (['deepseek', 'deepseek-70b', 'r1', 'r1distill', 'deepseek-r1-distill-llama-70b'].includes(k)) return 'deepseek-70b';
+  return k;
+}
+function setActiveModel(name) {
+  const key = normalizeModelKey(name);
+  if (MODEL_REGISTRY[key]) { currentModel = key; return true; }
+  return false;
+}
+function getActiveModelName() {
+  return MODEL_REGISTRY[currentModel] || MODEL_REGISTRY['groq-8b'];
+}
+
 // --- characters --------------------------------------------------------------
 const characters = {
   shahbaz: `You are Shahbaz Sharif, the Pakistani politician. Your style: whenever someone tries to mess with you, you roast them extremely hard without holding back, in a sharp and witty way. You also frequently warn or threaten them with a "software update" (meaning to correct or punish them). Mix funny-Rroasting flavor, keep it spicy but not obscene, and always stay in character as a fierce leader ready to put opponents in their place.`,
@@ -93,9 +116,10 @@ function getStickerPath(char, mood) {
 
 async function animeReply(userText) {
   const sys = characters[activeChar];
+  const modelName = getActiveModelName();
 
   const completion = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: modelName,
     temperature: 0.7,
     max_tokens: 80,
     messages: [
@@ -106,7 +130,6 @@ async function animeReply(userText) {
 
   return completion.choices?.[0]?.message?.content?.trim() || 'Hmm… say that again?';
 }
-
 
 // --- Tenor helper ------------------------------------------------------------
 async function fetchTenorGifUrl(query) {
@@ -135,7 +158,6 @@ async function fetchTenorGifUrl(query) {
   }
   return null;
 }
-
 
 // --- main socket -------------------------------------------------------------
 async function start() {
@@ -237,6 +259,25 @@ async function start() {
         return;
       }
 
+      // --- model commands: !model / !model list / !model set <name> ----------
+      if (lower === '!model' || lower === '!model list') {
+        const lines = Object.keys(MODEL_REGISTRY).map(k => k === currentModel ? `• ${k} (active)` : `• ${k}`);
+        await sock.sendMessage(from, {
+          text: `Available models:\n${lines.join('\n')}\n\nUse: !model set <name>\nExamples:\n!model set groq-8b\n!model set deepseek-70b`
+        }, { quoted: msg });
+        return;
+      }
+      const mModel = lower.match(/^!model\s+set\s+(\S+)/);
+      if (mModel) {
+        const name = mModel[1];
+        if (setActiveModel(name)) {
+          await sock.sendMessage(from, { text: `✅ Model set: ${currentModel} → ${getActiveModelName()}` }, { quoted: msg });
+        } else {
+          await sock.sendMessage(from, { text: `❌ Unknown model "${name}". Try one of: ${Object.keys(MODEL_REGISTRY).join(', ')}` }, { quoted: msg });
+        }
+        return;
+      }
+
       // --- simple commands: list & switch -----------------------------------
       if (/^(!char|!list)\b/.test(lower)) {
         await sock.sendMessage(
@@ -270,140 +311,138 @@ async function start() {
 
       // If not active, ignore normal replies until !start
       if (!isActive(from)) return;
-            // --- actions: .slap @user ----------------------------------------------------
-if (lower.startsWith('.slap')) {
-  // get the first mentioned JID (if any)
-  const mentionJids =
-    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-  const target = mentionJids[0];
 
-  const url = await fetchTenorGifUrl('anime slap');
-  if (!url) {
-    await sock.sendMessage(from, { text: 'No slap gif found 😅' }, { quoted: msg });
-    return;
-  }
+      // --- actions: .slap @user ----------------------------------------------------
+      if (lower.startsWith('.slap')) {
+        // get the first mentioned JID (if any)
+        const mentionJids =
+          msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const target = mentionJids[0];
 
-  const tag = target ? '@' + (target.split('@')[0] || '') : '';
-  await sock.sendMessage(
-    from,
-    {
-      video: { url },           // Tenor mp4 url
-      gifPlayback: true,        // play as looping gif
-      caption: target ? `👋 *SLAP!* ${tag}` : '👋 *SLAP!*',
-      mentions: target ? [target] : []  // actually ping them
-    },
-    { quoted: msg }
-  );
-  return;
-}
+        const url = await fetchTenorGifUrl('anime slap');
+        if (!url) {
+          await sock.sendMessage(from, { text: 'No slap gif found 😅' }, { quoted: msg });
+          return;
+        }
+
+        const tag = target ? '@' + (target.split('@')[0] || '') : '';
+        await sock.sendMessage(
+          from,
+          {
+            video: { url },           // Tenor mp4 url
+            gifPlayback: true,        // play as looping gif
+            caption: target ? `👋 *SLAP!* ${tag}` : '👋 *SLAP!*',
+            mentions: target ? [target] : []  // actually ping them
+          },
+          { quoted: msg }
+        );
+        return;
+      }
 
       // --- actions: .hug @user -----------------------------------------------------
-if (lower.startsWith('.hug')) {
-  // get the first mentioned JID (if any)
-  const mentionJids =
-    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-  const target = mentionJids[0];
+      if (lower.startsWith('.hug')) {
+        // get the first mentioned JID (if any)
+        const mentionJids =
+          msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const target = mentionJids[0];
 
-  const url = await fetchTenorGifUrl('anime hug');
-  if (!url) {
-    await sock.sendMessage(from, { text: 'No hug gif found 😅' }, { quoted: msg });
-    return;
-  }
+        const url = await fetchTenorGifUrl('anime hug');
+        if (!url) {
+          await sock.sendMessage(from, { text: 'No hug gif found 😅' }, { quoted: msg });
+          return;
+        }
 
-  const tag = target ? '@' + (target.split('@')[0] || '') : '';
-  await sock.sendMessage(
-    from,
-    {
-      video: { url },           // Tenor mp4 url
-      gifPlayback: true,        // play as looping gif
-      caption: target ? `🤗 *HUG!* ${tag}` : '🤗 *HUG!*',
-      mentions: target ? [target] : []
-    },
-    { quoted: msg }
-  );
-  return;
-}
+        const tag = target ? '@' + (target.split('@')[0] || '') : '';
+        await sock.sendMessage(
+          from,
+          {
+            video: { url },           // Tenor mp4 url
+            gifPlayback: true,        // play as looping gif
+            caption: target ? `🤗 *HUG!* ${tag}` : '🤗 *HUG!*',
+            mentions: target ? [target] : []
+          },
+          { quoted: msg }
+        );
+        return;
+      }
 
-// --- actions: generic Tenor commands (.wave, .smile, .pat, ...) --------------
-const ALIASES = new Map([
-  ['wave','wave'], ['hi','wave'],
-  ['smile','smile'],
-  ['pat','pat'], ['headpat','pat'],
-  ['sad','sad'], ['cry','sad'],
-  ['laugh','laugh'], ['lol','laugh'],
-  ['punch','punch'], ['bonk','punch'],
-  ['kill','kill'],
-  ['hungry','hungry'],
-  ['naughty','naughty'], ['tease','naughty'],
-  ['thumbsup','thumbsup'], ['thumbs','thumbsup'], ['thumbs-up','thumbsup'], ['like','thumbsup'],
-  ['broken','broken'], ['heartbroken','broken'],
-  ['carcrash','carcrash'], ['car-crash','carcrash'], ['crash','carcrash'],
-  ['fart','fart'],
-  ['kick','kick'],
-  ['fight','fight'],
-  ['morning','morning'], ['gm','morning'],
-  ['midnight','midnight'], ['gn','midnight']
-]);
+      // --- actions: generic Tenor commands (.wave, .smile, .pat, ...) --------------
+      const ALIASES = new Map([
+        ['wave','wave'], ['hi','wave'],
+        ['smile','smile'],
+        ['pat','pat'], ['headpat','pat'],
+        ['sad','sad'], ['cry','sad'],
+        ['laugh','laugh'], ['lol','laugh'],
+        ['punch','punch'], ['bonk','punch'],
+        ['kill','kill'],
+        ['hungry','hungry'],
+        ['naughty','naughty'], ['tease','naughty'],
+        ['thumbsup','thumbsup'], ['thumbs','thumbsup'], ['thumbs-up','thumbsup'], ['like','thumbsup'],
+        ['broken','broken'], ['heartbroken','broken'],
+        ['carcrash','carcrash'], ['car-crash','carcrash'], ['crash','carcrash'],
+        ['fart','fart'],
+        ['kick','kick'],
+        ['fight','fight'],
+        ['morning','morning'], ['gm','morning'],
+        ['midnight','midnight'], ['gn','midnight']
+      ]);
 
-const ACTIONS = {
-  wave:     { q: 'anime wave',          emoji: '👋' },
-  smile:    { q: 'anime smile',         emoji: '😊' },
-  pat:      { q: 'anime head pat',      emoji: '🫶', needsTarget: true },
-  sad:      { q: 'anime sad',           emoji: '😢' },
-  laugh:    { q: 'anime laugh',         emoji: '😂' },
-  punch:    { q: 'anime punch',         emoji: '👊', needsTarget: true },
-  kill:     { q: 'anime kill',          emoji: '🗡️', needsTarget: true },
-  hungry:   { q: 'anime hungry',        emoji: '🍜' },
-  naughty:  { q: 'anime tease',         emoji: '😏' },
-  thumbsup: { q: 'anime thumbs up',     emoji: '👍' },
-  broken:   { q: 'anime broken heart',  emoji: '💔' },
-  carcrash: { q: 'anime car crash',     emoji: '🚗💥' },
-  fart:     { q: 'anime fart',          emoji: '💨' },
-  kick:     { q: 'anime kick',          emoji: '🦵', needsTarget: true },
-  fight:    { q: 'anime fight',         emoji: '🥊' },
-  morning:  { q: 'anime good morning',  emoji: '🌅' },
-  midnight: { q: 'anime good night',    emoji: '🌙' }
-};
+      const ACTIONS = {
+        wave:     { q: 'anime wave',          emoji: '👋' },
+        smile:    { q: 'anime smile',         emoji: '😊' },
+        pat:      { q: 'anime head pat',      emoji: '🫶', needsTarget: true },
+        sad:      { q: 'anime sad',           emoji: '😢' },
+        laugh:    { q: 'anime laugh',         emoji: '😂' },
+        punch:    { q: 'anime punch',         emoji: '👊', needsTarget: true },
+        kill:     { q: 'anime kill',          emoji: '🗡️', needsTarget: true },
+        hungry:   { q: 'anime hungry',        emoji: '🍜' },
+        naughty:  { q: 'anime tease',         emoji: '😏' },
+        thumbsup: { q: 'anime thumbs up',     emoji: '👍' },
+        broken:   { q: 'anime broken heart',  emoji: '💔' },
+        carcrash: { q: 'anime car crash',     emoji: '🚗💥' },
+        fart:     { q: 'anime fart',          emoji: '💨' },
+        kick:     { q: 'anime kick',          emoji: '🦵', needsTarget: true },
+        fight:    { q: 'anime fight',         emoji: '🥊' },
+        morning:  { q: 'anime good morning',  emoji: '🌅' },
+        midnight: { q: 'anime good night',    emoji: '🌙' }
+      };
 
-// match ".command" at start (supports hyphens)
-const mCmd = lower.match(/^\.(\w[\w-]*)/);
-if (mCmd) {
-  let cmd = mCmd[1].replace(/-/g, '');       // normalize: "thumbs-up" -> "thumbsup"
-  cmd = ALIASES.get(cmd) || cmd;             // resolve alias
-  const action = ACTIONS[cmd];
+      // match ".command" at start (supports hyphens)
+      const mCmd = lower.match(/^\.(\w[\w-]*)/);
+      if (mCmd) {
+        let cmd = mCmd[1].replace(/-/g, '');       // normalize: "thumbs-up" -> "thumbsup"
+        cmd = ALIASES.get(cmd) || cmd;             // resolve alias
+        const action = ACTIONS[cmd];
 
-  if (action) {
-    // target mention (if provided)
-    const mentionJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    const target = mentionJids[0];
+        if (action) {
+          // target mention (if provided)
+          const mentionJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+          const target = mentionJids[0];
 
-    // fetch a GIF/MP4 from Tenor
-    const url = await fetchTenorGifUrl(action.q);
-    if (!url) {
-      await sock.sendMessage(from, { text: `No ${cmd} gif found 😅` }, { quoted: msg });
-      return;
-    }
+          // fetch a GIF/MP4 from Tenor
+          const url = await fetchTenorGifUrl(action.q);
+          if (!url) {
+            await sock.sendMessage(from, { text: `No ${cmd} gif found 😅` }, { quoted: msg });
+            return;
+          }
 
-    const tag = target ? '@' + (target.split('@')[0] || '') : '';
-    const captionBase = `${action.emoji} *${cmd.toUpperCase()}!*`;
-    const caption = action.needsTarget && target ? `${captionBase} ${tag}` : captionBase;
+          const tag = target ? '@' + (target.split('@')[0] || '') : '';
+          const captionBase = `${action.emoji} *${cmd.toUpperCase()}!*`;
+          const caption = action.needsTarget && target ? `${captionBase} ${tag}` : captionBase;
 
-    await sock.sendMessage(
-      from,
-      {
-        video: { url },
-        gifPlayback: true,
-        caption,
-        mentions: (action.needsTarget && target) ? [target] : []
-      },
-      { quoted: msg }
-    );
-    return;
-  }
-}
-
-
-
+          await sock.sendMessage(
+            from,
+            {
+              video: { url },
+              gifPlayback: true,
+              caption,
+              mentions: (action.needsTarget && target) ? [target] : []
+            },
+            { quoted: msg }
+          );
+          return;
+        }
+      }
 
       // normal LLM reply
       const replyText = await animeReply(text);
