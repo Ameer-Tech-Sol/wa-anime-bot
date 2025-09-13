@@ -297,6 +297,33 @@ if (lower.startsWith('.slap')) {
   return;
 }
 
+      // --- actions: .hug @user -----------------------------------------------------
+if (lower.startsWith('.hug')) {
+  // get the first mentioned JID (if any)
+  const mentionJids =
+    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  const target = mentionJids[0];
+
+  const url = await fetchTenorGifUrl('anime hug');
+  if (!url) {
+    await sock.sendMessage(from, { text: 'No hug gif found 😅' }, { quoted: msg });
+    return;
+  }
+
+  const tag = target ? '@' + (target.split('@')[0] || '') : '';
+  await sock.sendMessage(
+    from,
+    {
+      video: { url },           // Tenor mp4 url
+      gifPlayback: true,        // play as looping gif
+      caption: target ? `🤗 *HUG!* ${tag}` : '🤗 *HUG!*',
+      mentions: target ? [target] : []
+    },
+    { quoted: msg }
+  );
+  return;
+}
+
 
 
       // normal LLM reply
