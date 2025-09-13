@@ -107,6 +107,36 @@ async function animeReply(userText) {
   return completion.choices?.[0]?.message?.content?.trim() || 'Hmm… say that again?';
 }
 
+
+// --- Tenor helper ------------------------------------------------------------
+async function fetchTenorGifUrl(query) {
+  const key = process.env.TENOR_API_KEY;
+  if (!key) return null;
+
+  const params = new URLSearchParams({
+    key,
+    q: query,
+    limit: '25',
+    random: 'true',
+    contentfilter: process.env.TENOR_CONTENT_FILTER || 'high',
+    locale: process.env.TENOR_LOCALE || 'en'
+  });
+
+  const res = await fetch(`https://tenor.googleapis.com/v2/search?${params.toString()}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const results = data?.results || [];
+
+  // prefer small MP4 (plays as GIF in WhatsApp)
+  for (const r of results) {
+    const mf = r.media_formats || {};
+    const url = mf.tinymp4?.url || mf.nanomp4?.url || mf.mp4?.url || mf.gif?.url;
+    if (url) return url;
+  }
+  return null;
+}
+
+
 // --- main socket -------------------------------------------------------------
 async function start() {
   if (!process.env.GROQ_API_KEY) {
@@ -240,6 +270,34 @@ async function start() {
 
       // If not active, ignore normal replies until !start
       if (!isActive(from)) return;
+            // --- actions: .slap @user ----------------------------------------------------
+if (lower.startsWith('.slap')) {
+  // get the first mentioned JID (if any)
+  const mentionJids =
+    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  const target = mentionJids[0];
+
+  const url = await fetchTenorGifUrl('anime slap');
+  if (!url) {
+    await sock.sendMessage(from, { text: 'No slap gif found 😅' }, { quoted: msg });
+    return;
+  }
+
+  const tag = target ? '@' + (target.split('@')[0] || '') : '';
+  await sock.sendMessage(
+    from,
+    {
+      video: { url },           // Tenor mp4 url
+      gifPlayback: true,        // play as looping gif
+      caption: target ? `👋 *SLAP!* ${tag}` : '👋 *SLAP!*',
+      mentions: target ? [target] : []  // actually ping them
+    },
+    { quoted: msg }
+  );
+  return;
+}
+
+
 
       // normal LLM reply
       const replyText = await animeReply(text);
