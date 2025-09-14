@@ -216,7 +216,37 @@ function run(cmd, args = []) {
   });
 }
 
+function normalizeDlUrl(u = '') {
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^www\./, '');
+
+    // --- YouTube: convert /shorts/<id> → /watch?v=<id>
+    if (host === 'youtube.com' || host === 'm.youtube.com') {
+      const m = u.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/);
+      if (m && m[1]) return `https://www.youtube.com/watch?v=${m[1]}`;
+    }
+    // youtu.be/<id> → watch?v=<id>
+    if (host === 'youtu.be') {
+      const id = url.pathname.replace(/^\//, '');
+      if (id) return `https://www.youtube.com/watch?v=${id}`;
+    }
+
+    // --- Facebook: normalize some share/watch variants
+    if (host === 'fb.watch') {
+      const id = url.pathname.replace(/^\//, '').replace(/\/+$/, '');
+      if (id) return `https://fb.watch/${id}/`;
+    }
+
+    return u;
+  } catch {
+    return u;
+  }
+}
+
+
 async function downloadViaYtDlp(url) {
+  url = normalizeDlUrl(url);
   const outTpl = path.join(os.tmpdir(), 'dl-%(title).80s-%(id)s.%(ext)s');
   const ytdlpArgs = [
     '--no-playlist',
