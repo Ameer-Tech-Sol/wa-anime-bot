@@ -250,7 +250,7 @@ async function downloadViaYtDlp(url) {
   const outTpl = path.join(os.tmpdir(), 'dl-%(title).80s-%(id)s.%(ext)s');
   const ytdlpArgs = [
     '--no-playlist',
-    '--format', 'bv*[height<=480]+ba/b[height<=480]/b[ext=mp4]/b',
+//    '--format', 'bv*[height<=480]+ba/b[height<=480]/b[ext=mp4]/b',
     '--merge-output-format', 'mp4',
     '--restrict-filenames',
     '--max-filesize', '45M',        // cap ~45 MB so it fits WhatsApp
