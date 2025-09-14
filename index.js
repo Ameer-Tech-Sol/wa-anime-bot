@@ -1,5 +1,7 @@
 // index.js — WhatsApp bot (Baileys MD, ESM) + Groq multi-character + stickers
 import 'dotenv/config';
+import os from 'os';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import qrcode from 'qrcode-terminal';
@@ -195,6 +197,44 @@ async function fetchTenorGifUrl(query) {
   return null;
 }
 
+// --- downloader (yt-dlp) -----------------------------------------------------
+const SUPPORTED_DL = /(youtube\.com|youtu\.be|instagram\.com|facebook\.com|fb\.watch|tiktok\.com)/i;
+
+function findSupportedUrl(text = '') {
+  const urls = (text.match(/https?:\/\/\S+/gi) || []);
+  for (const u of urls) if (SUPPORTED_DL.test(u)) return u;
+  return null;
+}
+
+function run(cmd, args = []) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    p.stdout.on('data', d => (out += d.toString()));
+    p.stderr.on('data', d => (err += d.toString()));
+    p.on('close', code => (code === 0 ? resolve({ out, err }) : reject(new Error(err || out || `exit ${code}`))));
+  });
+}
+
+async function downloadViaYtDlp(url) {
+  const outTpl = path.join(os.tmpdir(), 'dl-%(title).80s-%(id)s.%(ext)s');
+  const ytdlpArgs = [
+    '--no-playlist',
+    '--format', 'bv*[height<=480]+ba/b[height<=480]/b[ext=mp4]/b',
+    '--merge-output-format', 'mp4',
+    '--restrict-filenames',
+    '--max-filesize', '45M',        // cap ~45 MB so it fits WhatsApp
+    '--output', outTpl,
+    '--print', 'filename',
+    '--quiet'
+  ];
+  const { out } = await run('yt-dlp', [...ytdlpArgs, url]);
+  const file = out.trim().split('\n').filter(Boolean).pop();
+  if (!file || !fs.existsSync(file)) throw new Error('Download failed or file missing.');
+  return file;
+}
+
+
 // --- main socket -------------------------------------------------------------
 async function start() {
   if (!process.env.GROQ_API_KEY) {
@@ -347,6 +387,45 @@ async function start() {
 
       // If not active, ignore normal replies until !start
       if (!isActive(from)) return;
+
+      // --- video downloader: .dl <url> + auto-detect links ------------------------
+let urlToGet = null;
+
+// explicit command: .dl <url>
+if (lower.startsWith('.dl ')) {
+  const parts = text.trim().split(/\s+/);
+  urlToGet = parts[1];
+  if (!urlToGet || !SUPPORTED_DL.test(urlToGet)) {
+    await sock.sendMessage(from, { text: 'Use: `.dl <youtube/instagram/tiktok/facebook link>`' }, { quoted: msg });
+    return;
+  }
+}
+
+// auto-detect: any supported link in the message
+if (!urlToGet) {
+  const found = findSupportedUrl(text);
+  if (found) urlToGet = found;
+}
+
+if (urlToGet) {
+  try {
+    await sock.sendMessage(from, { text: '⏬ Downloading… (≤480p, ≤45MB)' }, { quoted: msg });
+    const file = await downloadViaYtDlp(urlToGet);
+
+    await sock.sendMessage(
+      from,
+      { video: fs.readFileSync(file), mimetype: 'video/mp4', fileName: path.basename(file) },
+      { quoted: msg }
+    );
+
+    try { fs.unlinkSync(file); } catch {}
+  } catch (e) {
+    const msgErr = ('' + (e?.message || e)).slice(0, 220);
+    await sock.sendMessage(from, { text: `❌ Couldn’t download:\n${msgErr}\n\nTip: private/age-gated links or very large files may fail.` }, { quoted: msg });
+  }
+  return;
+}
+
 
       // --- actions: .slap @user ----------------------------------------------------
       if (lower.startsWith('.slap')) {
