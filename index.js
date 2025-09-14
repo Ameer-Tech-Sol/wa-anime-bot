@@ -197,6 +197,7 @@ async function fetchTenorGifUrl(query) {
   return null;
 }
 
+
 // --- main socket -------------------------------------------------------------
 async function start() {
   if (!process.env.GROQ_API_KEY) {
