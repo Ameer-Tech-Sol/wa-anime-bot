@@ -208,13 +208,29 @@ function findSupportedUrl(text = '') {
 
 function run(cmd, args = []) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const fs = require('fs');
+    const path = require('path');
+
+    // If caller asked for "yt-dlp", prefer the project-local binary if present.
+    const localYtDlp = path.join(__dirname, 'bin', 'yt-dlp');
+    const actualCmd = (cmd === 'yt-dlp' && fs.existsSync(localYtDlp)) ? localYtDlp : cmd;
+
+    const p = spawn(actualCmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
+
     p.stdout.on('data', d => (out += d.toString()));
     p.stderr.on('data', d => (err += d.toString()));
+
     p.on('close', code => (code === 0 ? resolve({ out, err }) : reject(new Error(err || out || `exit ${code}`))));
   });
 }
+
+
+// Prefer project-local yt-dlp if present; fallback to PATH
+const YTDLP_BIN = require('fs').existsSync(require('path').join(__dirname, 'bin', 'yt-dlp'))
+  ? require('path').join(__dirname, 'bin', 'yt-dlp')
+  : 'yt-dlp';
+
 
 async function downloadViaYtDlp(url) {
   const outTpl = path.join(os.tmpdir(), 'dl-%(title).80s-%(id)s.%(ext)s');
