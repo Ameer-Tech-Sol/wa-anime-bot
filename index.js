@@ -196,7 +196,7 @@ async function fetchTenorGifUrl(query) {
   }
   return null;
 }
-
+/*
 // --- downloader (yt-dlp) -----------------------------------------------------
 const SUPPORTED_DL = /(youtube\.com|youtu\.be|instagram\.com|facebook\.com|fb\.watch|tiktok\.com)/i;
 
@@ -265,7 +265,7 @@ async function downloadViaYtDlp(url) {
   if (!file || !fs.existsSync(file)) throw new Error('Download failed or file missing.');
   return file;
 }
-
+*/
 
 // --- main socket -------------------------------------------------------------
 async function start() {
