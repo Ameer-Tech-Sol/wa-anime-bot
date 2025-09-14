@@ -224,6 +224,8 @@ async function downloadViaYtDlp(url) {
     '--merge-output-format', 'mp4',
     '--restrict-filenames',
     '--max-filesize', '45M',        // cap ~45 MB so it fits WhatsApp
+    '--cookies', 'cookies.txt',
+    '--extractor-args', 'youtube:player_client=android', // small workaround for some Shorts
     '--output', outTpl,
     '--print', 'filename',
     '--quiet'
