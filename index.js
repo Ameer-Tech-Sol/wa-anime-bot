@@ -1,4 +1,5 @@
 // index.js — WhatsApp bot (Baileys MD, ESM) + Groq multi-character + stickers
+import { fetchYoutubeMP4 } from "./ytdl.js";
 import 'dotenv/config';
 import os from 'os';
 import { spawn } from 'child_process';
@@ -521,6 +522,42 @@ if (urlToGet) {
           return;
         }
       }
+      // --- YouTube downloader ---
+// Pattern: either "!yt <url>" OR any shared YouTube link in text
+if (m.text) {
+  const ytRegex = /(https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[\w-]+|https?:\/\/youtu\.be\/[\w-]+)/i;
+  const ytCmd = m.text.startsWith("!yt ");
+
+  let ytUrl = null;
+  if (ytCmd) {
+    ytUrl = m.text.split(" ")[1];
+  } else {
+    const match = m.text.match(ytRegex);
+    if (match) ytUrl = match[0];
+  }
+
+  if (ytUrl) {
+    try {
+      await sock.sendMessage(m.key.remoteJid, { text: "⏳ Fetching video..." });
+      const res = await fetchYoutubeMP4(ytUrl);
+
+      if (!res.url) throw new Error("No direct URL found");
+
+      // WhatsApp Baileys: send video by URL
+      await sock.sendMessage(m.key.remoteJid, {
+        video: { url: res.url },
+        caption: `🎬 *${res.title}* (${res.quality})`
+      });
+
+      return; // stop further processing for this message
+    } catch (err) {
+      console.error("YouTube fetch error:", err);
+      await sock.sendMessage(m.key.remoteJid, { text: "❌ Failed to fetch video." });
+      return;
+    }
+  }
+}
+
 
       // normal LLM reply
       const replyText = await animeReply(text);
