@@ -211,7 +211,7 @@ function isYoutubeUrl(u) {
     return ['youtube.com','youtu.be','m.youtube.com','music.youtube.com'].some(d => h.endsWith(d));
   } catch { return false; }
 }
-
+/*
 // Normalize Shorts / youtu.be to standard watch URL
 function normalizeYouTubeUrl(raw) {
   try {
@@ -228,7 +228,7 @@ function normalizeYouTubeUrl(raw) {
   } catch {}
   return raw;
 }
-
+*/
 
 async function rapidGetJson(pathWithQuery) {
   if (!YTDL_KEY || !YTDL_HOST || !YTDL_BASE) throw new Error('YTDL env missing');
@@ -510,7 +510,8 @@ async function start() {
 const mYt = lower.match(/^\.(yt|ytdl|yta)\s+(https?:\/\/\S+)/);
 if (mYt) {
   const url = mYt[2];
-  if (!isYoutubeUrl(url)) {
+  const normalized = normalizeYouTubeUrl(url);
+  if (!isYoutubeUrl(normalized)) {
     await sock.sendMessage(from, { text: '❌ Please send a valid YouTube link.' }, { quoted: msg });
     return;
   }
