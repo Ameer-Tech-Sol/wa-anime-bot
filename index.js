@@ -211,24 +211,7 @@ function isYoutubeUrl(u) {
     return ['youtube.com','youtu.be','m.youtube.com','music.youtube.com'].some(d => h.endsWith(d));
   } catch { return false; }
 }
-/*
-// Normalize Shorts / youtu.be to standard watch URL
-function normalizeYouTubeUrl(raw) {
-  try {
-    const u = new URL(raw);
-    const host = u.hostname.replace(/^www\./, '');
-    // youtu.be/<id>
-    if (host === 'youtu.be') {
-      const id = u.pathname.slice(1);
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    // youtube.com/shorts/<id>
-    const m = u.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{5,})/);
-    if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
-  } catch {}
-  return raw;
-}
-*/
+
 
 async function rapidGetJson(pathWithQuery) {
   if (!YTDL_KEY || !YTDL_HOST || !YTDL_BASE) throw new Error('YTDL env missing');
@@ -302,57 +285,6 @@ function pickBestMp4(list) {
   scored.sort((a,b) => b.score - a.score);
   return scored[0]?.url || null;
 }
-
-// --- YouTube URL normalizer + stronger collectors ---------------------------
-function normalizeYouTubeUrl(raw) {
-  try {
-    const u = new URL(raw);
-    const host = u.hostname.replace(/^www\./, '');
-    // youtu.be/<id>
-    if (host === 'youtu.be') {
-      const id = u.pathname.slice(1);
-      if (id) return `https://www.youtube.com/watch?v=${id}`;
-    }
-    // youtube.com/shorts/<id>
-    const m = u.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{5,})/);
-    if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
-  } catch {}
-  return raw;
-}
-
-// drill into more shapes commonly returned by RapidAPI aggregators
-function collectUrlsFromUnknownSchema(obj, out) {
-  if (!obj || typeof obj !== 'object') return;
-  if (Array.isArray(obj)) { obj.forEach(v => collectUrlsFromUnknownSchema(v, out)); return; }
-
-  // direct url-ish fields
-  if (typeof obj.url === 'string') out.push(obj);
-  if (typeof obj.link === 'string') out.push({ url: obj.link, quality: obj.quality, ext: obj.ext || 'mp4' });
-  if (typeof obj.download_url === 'string') out.push({ url: obj.download_url, quality: obj.quality, ext: obj.ext || 'mp4' });
-
-  // formats & streamingData (common YouTube-ish schemas)
-  if (Array.isArray(obj.formats)) obj.formats.forEach(f => {
-    if (f && (f.url || f.link)) out.push({ url: f.url || f.link, ext: (f.ext || (f.mimeType || '').includes('mp4') ? 'mp4' : undefined), quality: f.quality || f.qualityLabel });
-  });
-  if (obj.streamingData) {
-    const sd = obj.streamingData;
-    const arrs = [sd.formats, sd.adaptiveFormats].filter(Boolean);
-    arrs.flat().forEach(f => {
-      if (f && (f.url || f.signatureCipher || f.cipher)) {
-        // If API already resolves signature, there will be a `url`. (If only cipher is present, most Rapid APIs also provide a parallel resolved field somewhere else.)
-        if (f.url) out.push({ url: f.url, ext: (f.mimeType || '').includes('mp4') ? 'mp4' : undefined, quality: f.qualityLabel || f.quality });
-      }
-    });
-  }
-
-  // generic deep walk
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (v && typeof v === 'object') collectUrlsFromUnknownSchema(v, out);
-  }
-}
-
-
 
 
 // --- main socket -------------------------------------------------------------
