@@ -1,5 +1,5 @@
 // index.js — WhatsApp bot (Baileys MD, ESM) + Groq multi-character + stickers
-import { fetchYoutubeMP4 } from "./ytdl.js";
+
 import 'dotenv/config';
 import os from 'os';
 import { spawn } from 'child_process';
