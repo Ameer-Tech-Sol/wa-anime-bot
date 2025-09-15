@@ -26,7 +26,7 @@ const MODEL_REGISTRY = {
   'deepseek-70b': 'deepseek-r1-distill-llama-70b',
 };
 // default active model
-let currentModel = 'groq-8b';
+let currentModel = 'deepseek-70b';
 
 function normalizeModelKey(s) {
   const k = (s || '').toLowerCase().trim();
@@ -95,11 +95,18 @@ function resolveChar(name) {
 // --- helpers -----------------------------------------------------------------
 function getTextFromMessage(message) {
   if (!message) return '';
-  const direct = message.conversation;
-  const extended = message.extendedTextMessage?.text;
-  const imgCap = message.imageMessage?.caption;
-  return direct || extended || imgCap || '';
+  return (
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.buttonsResponseMessage?.selectedDisplayText ||
+    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    message.templateButtonReplyMessage?.selectedId ||
+    ''
+  ).trim();
 }
+
 
 function detectMood(text) {
   const t = text.toLowerCase();
@@ -365,30 +372,6 @@ if (lower.startsWith('.dl ')) {
   }
 }
 
-// auto-detect: any supported link in the message
-if (!urlToGet) {
-  const found = findSupportedUrl(text);
-  if (found) urlToGet = found;
-}
-
-if (urlToGet) {
-  try {
-    await sock.sendMessage(from, { text: '⏬ Downloading… (≤480p, ≤45MB)' }, { quoted: msg });
-    const file = await downloadViaYtDlp(urlToGet);
-
-    await sock.sendMessage(
-      from,
-      { video: fs.readFileSync(file), mimetype: 'video/mp4', fileName: path.basename(file) },
-      { quoted: msg }
-    );
-
-    try { fs.unlinkSync(file); } catch {}
-  } catch (e) {
-    const msgErr = ('' + (e?.message || e)).slice(0, 220);
-    await sock.sendMessage(from, { text: `❌ Couldn’t download:\n${msgErr}\n\nTip: private/age-gated links or very large files may fail.` }, { quoted: msg });
-  }
-  return;
-}
 
 
       // --- actions: .slap @user ----------------------------------------------------
@@ -523,40 +506,39 @@ if (urlToGet) {
         }
       }
       // --- YouTube downloader ---
-// Pattern: either "!yt <url>" OR any shared YouTube link in text
-if (m.text) {
-  const ytRegex = /(https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[\w-]+|https?:\/\/youtu\.be\/[\w-]+)/i;
-  const ytCmd = m.text.startsWith("!yt ");
-
+// Supports: "!yt <url>"  OR any message containing a YT/Shorts link
+{
+  const ytRegex = /(https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[\w-]+|https?:\/\/youtu\.be\/[\w-]+|https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+)/i;
+  const ytCmd = text.toLowerCase().startsWith('!yt ');
   let ytUrl = null;
+
   if (ytCmd) {
-    ytUrl = m.text.split(" ")[1];
+    ytUrl = text.split(/\s+/)[1];
   } else {
-    const match = m.text.match(ytRegex);
+    const match = text.match(ytRegex);
     if (match) ytUrl = match[0];
   }
 
   if (ytUrl) {
     try {
-      await sock.sendMessage(m.key.remoteJid, { text: "⏳ Fetching video..." });
+      await sock.sendMessage(from, { text: '⏳ Fetching video...' }, { quoted: msg });
       const res = await fetchYoutubeMP4(ytUrl);
+      if (!res?.url) throw new Error('No direct URL found');
 
-      if (!res.url) throw new Error("No direct URL found");
-
-      // WhatsApp Baileys: send video by URL
-      await sock.sendMessage(m.key.remoteJid, {
+      await sock.sendMessage(from, {
         video: { url: res.url },
         caption: `🎬 *${res.title}* (${res.quality})`
-      });
+      }, { quoted: msg });
 
       return; // stop further processing for this message
     } catch (err) {
-      console.error("YouTube fetch error:", err);
-      await sock.sendMessage(m.key.remoteJid, { text: "❌ Failed to fetch video." });
+      console.error('YouTube fetch error:', err);
+      await sock.sendMessage(from, { text: '❌ Failed to fetch video.' }, { quoted: msg });
       return;
     }
   }
 }
+
 
 
       // normal LLM reply
