@@ -95,17 +95,12 @@ function resolveChar(name) {
 // --- helpers -----------------------------------------------------------------
 function getTextFromMessage(message) {
   if (!message) return '';
-  return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.buttonsResponseMessage?.selectedDisplayText ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    message.templateButtonReplyMessage?.selectedId ||
-    ''
-  ).trim();
+  const direct = message.conversation;
+  const extended = message.extendedTextMessage?.text;
+  const imgCap = message.imageMessage?.caption;
+  return direct || extended || imgCap || '';
 }
+
 
 
 function detectMood(text) {
@@ -204,6 +199,92 @@ async function fetchTenorGifUrl(query) {
   }
   return null;
 }
+
+// --- RapidAPI YouTube DL helper ---------------------------------------------
+const YTDL_HOST = process.env.YTDL_API_HOST;
+const YTDL_BASE = (process.env.YTDL_API_BASE_URL || '').replace(/\/+$/, '');
+const YTDL_KEY  = process.env.YTDL_API_KEY;
+
+function isYoutubeUrl(u) {
+  try {
+    const h = new URL(u).hostname.replace(/^www\./, '');
+    return ['youtube.com','youtu.be','m.youtube.com','music.youtube.com'].some(d => h.endsWith(d));
+  } catch { return false; }
+}
+
+async function rapidGetJson(pathWithQuery) {
+  if (!YTDL_KEY || !YTDL_HOST || !YTDL_BASE) throw new Error('YTDL env missing');
+  const url = `${YTDL_BASE}${pathWithQuery}`;
+  const res = await fetch(url, {
+    headers: {
+      'X-RapidAPI-Key': YTDL_KEY,
+      'X-RapidAPI-Host': YTDL_HOST,
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) throw new Error(`rapidapi ${res.status}`);
+  return res.json();
+}
+
+// Try several common endpoint shapes used by this RapidAPI and hunt for MP4s
+async function getYtMp4Link(videoUrl) {
+  const endpoints = [
+    `/ytmp4?url=${encodeURIComponent(videoUrl)}`,
+    `/mp4/?url=${encodeURIComponent(videoUrl)}`,
+    `/youtube-info/?url=${encodeURIComponent(videoUrl)}`,
+    `/videoInfo?url=${encodeURIComponent(videoUrl)}`
+  ];
+  const candidates = [];
+  for (const ep of endpoints) {
+    try {
+      const j = await rapidGetJson(ep);
+      collectUrlsFromUnknownSchema(j, candidates);
+      if (candidates.length) break;
+    } catch {}
+  }
+  return pickBestMp4(candidates);
+}
+
+function collectUrlsFromUnknownSchema(obj, out) {
+  if (!obj || typeof obj !== 'object') return;
+  if (Array.isArray(obj)) { obj.forEach(v => collectUrlsFromUnknownSchema(v, out)); return; }
+  if (obj.url && typeof obj.url === 'string') out.push(obj);
+  if (obj.download_url) out.push({ url: obj.download_url, quality: obj.quality, ext: obj.ext || 'mp4' });
+  if (obj.link) out.push({ url: obj.link, quality: obj.quality, ext: obj.ext || 'mp4' });
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (v && typeof v === 'object') collectUrlsFromUnknownSchema(v, out);
+  }
+}
+
+function pickBestMp4(list) {
+  const mp4s = list
+    .map(x => typeof x === 'string' ? { url: x } : x)
+    .filter(x => /mp4|video/i.test(x.ext || '') || /\.mp4(\?|$)/i.test(x.url || ''));
+
+  if (!mp4s.length) return null;
+
+  const scored = mp4s.map(x => {
+    let sizeMB;
+    const sz = x.size || x.filesize || x.fileSize || x.size_kb || x.sizeKb;
+    if (typeof sz === 'number') sizeMB = sz > 10000 ? sz/1024/1024 : sz/1024;
+    if (typeof sz === 'string') {
+      const m = sz.match(/([\d.]+)\s*(kb|mb|gb)/i);
+      if (m) {
+        const v = parseFloat(m[1]), unit = m[2].toLowerCase();
+        sizeMB = unit === 'gb' ? v*1024 : unit === 'mb' ? v : v/1024;
+      }
+    }
+    const within = sizeMB ? (sizeMB <= 25 ? 3 : sizeMB <= 40 ? 1 : -1) : 2;
+    const q = String(x.quality || x.qualityLabel || '');
+    const qScore = /720|480/.test(q) ? 2 : /1080|2160/.test(q) ? 1 : 0;
+    return { url: x.url, score: within*10 + qScore };
+  });
+
+  scored.sort((a,b) => b.score - a.score);
+  return scored[0]?.url || null;
+}
+
 
 
 // --- main socket -------------------------------------------------------------
@@ -357,6 +438,30 @@ async function start() {
       }
 
       // If not active, ignore normal replies until !start
+      // --- .yt/.ytdl/.yta <url> (YouTube via RapidAPI) -----------------------------
+const mYt = lower.match(/^\.(yt|ytdl|yta)\s+(https?:\/\/\S+)/);
+if (mYt) {
+  const url = mYt[2];
+  if (!isYoutubeUrl(url)) {
+    await sock.sendMessage(from, { text: '❌ Please send a valid YouTube link.' }, { quoted: msg });
+    return;
+  }
+  try {
+    await sock.sendMessage(from, { text: '⏬ Fetching link…' }, { quoted: msg });
+    const dl = await getYtMp4Link(url);
+    if (!dl) {
+      await sock.sendMessage(from, { text: '❌ Could not find a downloadable MP4 for that video.' }, { quoted: msg });
+      return;
+    }
+    // Let WhatsApp fetch the URL directly (no disk usage on VM)
+    await sock.sendMessage(from, { video: { url: dl }, caption: '✅ Here you go' }, { quoted: msg });
+  } catch (e) {
+    console.error('rapid ytdl error:', e);
+    await sock.sendMessage(from, { text: '❌ Download failed (maybe private/too large).' }, { quoted: msg });
+  }
+  return;
+}
+
       if (!isActive(from)) return;
 
       // --- video downloader: .dl <url> + auto-detect links ------------------------
@@ -505,39 +610,7 @@ if (lower.startsWith('.dl ')) {
           return;
         }
       }
-      // --- YouTube downloader ---
-// Supports: "!yt <url>"  OR any message containing a YT/Shorts link
-{
-  const ytRegex = /(https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[\w-]+|https?:\/\/youtu\.be\/[\w-]+|https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+)/i;
-  const ytCmd = text.toLowerCase().startsWith('!yt ');
-  let ytUrl = null;
-
-  if (ytCmd) {
-    ytUrl = text.split(/\s+/)[1];
-  } else {
-    const match = text.match(ytRegex);
-    if (match) ytUrl = match[0];
-  }
-
-  if (ytUrl) {
-    try {
-      await sock.sendMessage(from, { text: '⏳ Fetching video...' }, { quoted: msg });
-      const res = await fetchYoutubeMP4(ytUrl);
-      if (!res?.url) throw new Error('No direct URL found');
-
-      await sock.sendMessage(from, {
-        video: { url: res.url },
-        caption: `🎬 *${res.title}* (${res.quality})`
-      }, { quoted: msg });
-
-      return; // stop further processing for this message
-    } catch (err) {
-      console.error('YouTube fetch error:', err);
-      await sock.sendMessage(from, { text: '❌ Failed to fetch video.' }, { quoted: msg });
-      return;
-    }
-  }
-}
+      
 
 
 
