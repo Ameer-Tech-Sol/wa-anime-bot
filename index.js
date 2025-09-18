@@ -148,70 +148,32 @@ function getStickerPath(char, mood) {
   return null;
 }
 
-// tiny style sample for DeepSeek priming
-function primerFromChar(char) {
-  switch (char) {
-    case 'shahbaz':
-      return 'Beta, seedhi baat karo — warna software update taiyar hai.'; // short, in-character
-    case 'hinata':
-      return 'H-hello… um, I believe in you. (gentle, shy, very brief)';
-    case 'einstein':
-      return 'Let’s keep it simple and precise—one clear point, no fluff.';
-    case 'reina':
-      return 'Tch. Try to keep up, peasant. (short, sharp, tsundere)';
-    case 'zafri':
-      return 'Chal oye, itni slow processing? RAM te dhoyee hoyee lagdi ae!'; // playful juggat vibe
-    default:
-      return 'Speak briefly, in first person, as this character.';
-  }
-}
-
-// replies in-character; Groq unchanged; DeepSeek gets a style primer
 async function animeReply(userText) {
-  const sysPersona = characters[activeChar];
+  const sys = characters[activeChar];
   const modelName = getActiveModelName();
-  const isDeepseek = /deepseek/i.test(modelName);
 
-  const systemMsg =
-    sysPersona +
-    "\nHard rules: Stay strictly in character and speak in first person. " +
-    "Reply in the SAME LANGUAGE the user used. Output ONLY the final chat message—" +
-    "no explanations, no translations, no analysis, no meta, no <think>. " +
-    "Keep it to 1–2 short sentences, maximum.";
 
-  // Base messages for Groq (unchanged)
-  let messages = [
-    { role: 'system', content: systemMsg },
-    { role: 'user', content: userText }
-  ];
-
-  // DeepSeek: add a one-line sample BEFORE the user to anchor the style
-  if (isDeepseek) {
-    messages = [
-      { role: 'system', content: systemMsg },
-      { role: 'assistant', content: primerFromChar(activeChar) + "  (style sample — do NOT repeat this literally.)" },
-      { role: 'user', content: userText }
-    ];
-  }
-
-  // Gentle: no stop tokens unless you still want to suppress <think>
-  // (leaving them out avoids empty replies). If you really want one, use:
-  // const extra = isDeepseek ? { stop: '</think>' } : {};
-  const extra = {};
-
-  const completion = await groq.chat.completions.create({
+  const completion = await deepseek.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    ...extra,
-    messages
+    messages: [
+      {
+        role: 'system',
+        content:
+          sys +
+          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
+      },
+      { role: 'user', content: userText }
+    ]
   });
 
   const raw = completion.choices?.[0]?.message?.content || '';
-  let txt = stripReasoning(raw);       // you already have this helper
-  txt = clampSentences(txt, 2);        // and this one too
+  let txt = stripReasoning(raw);
+  txt = clampSentences(txt, 2);
   return txt || '…';
 }
+
 
 
 
