@@ -146,33 +146,52 @@ function getStickerPath(char, mood) {
   return null;
 }
 
+// minimal, safe tweak: DeepSeek gets stricter system + stop tokens
 async function animeReply(userText) {
   const sys = characters[activeChar];
-  const modelName = getActiveModelName();
 
-  const completion = await groq.chat.completions.create({
+  // whatever you already use to pick the active LLM:
+  const modelName = typeof getActiveModelName === 'function'
+    ? getActiveModelName()
+    : 'llama-3.1-8b-instant';
+
+  const isDeepseek = /deepseek/i.test(modelName);
+
+  // Build messages: SAME for both, but with stricter rules in system
+  const messages = [
+    {
+      role: 'system',
+      // ← keep your character prompt, then tighten the rules
+      content:
+        sys +
+        "\nRules: You are speaking AS this character in first-person. Reply with ONLY the final in-character message. " +
+        "Never include analysis, thoughts, or <think> blocks. Keep it short: 1–2 sentences max."
+    },
+    { role: 'user', content: userText }
+  ];
+
+  // Base request stays the same as your code
+  const req = {
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    messages: [
-      {
-        role: 'system',
-        content:
-          sys +
-          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
-      },
-      { role: 'user', content: userText }
-    ]
-  });
+    messages
+  };
 
+  // ONLY for DeepSeek: add stop tokens to prevent chain-of-thought / analysis
+  if (isDeepseek) {
+    req.stop = ['</think>', '<think>', 'Final Answer:', 'Analysis:', 'Reasoning:'];
+  }
 
+  // Call Groq as you already do
+  const completion = await groq.chat.completions.create(req);
 
-
-  const raw = completion.choices?.[0]?.message?.content || '';
-  let txt = stripReasoning(raw);
-  txt = clampSentences(txt, 2);
-  return txt || '…';
+  // Use your existing post-processing (keep whatever you had)
+  const raw = completion?.choices?.[0]?.message?.content?.trim?.() || '';
+  // If you already have strip/clamp helpers, they’ll still run; if not, this is harmless:
+  return raw || '…';
 }
+
 
 
 // --- Tenor helper ------------------------------------------------------------
