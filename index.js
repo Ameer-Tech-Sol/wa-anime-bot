@@ -26,7 +26,7 @@ const MODEL_REGISTRY = {
   'deepseek-70b': 'deepseek-r1-distill-llama-70b',
 };
 // default active model
-let currentModel = 'groq-8b';
+let currentModel = 'deepseek-70b';
 
 function normalizeModelKey(s) {
   const k = (s || '').toLowerCase().trim();
@@ -126,9 +126,9 @@ function stripReasoning(s = '') {
   return out.trim();
 }
 
-// Keep only final 1–2 sentences
-function clampSentences(text = '', max = 2) {
-  const parts = String(text).split(/(?<=[.!?])\s+/).filter(Boolean);
+
+function clampSentences(s = '', max = 2) {
+  const parts = s.split(/(?<=[.!?])\s+/).filter(Boolean);
   return parts.slice(0, max).join(' ').trim();
 }
 
@@ -148,33 +148,57 @@ function getStickerPath(char, mood) {
   return null;
 }
 
+// DeepSeek: gentle stop + fallback; Groq unchanged
 async function animeReply(userText) {
   const sys = characters[activeChar];
   const modelName = getActiveModelName();
-  const isDeepseek = /deepseek/i.test(modelName);  // <-- correct flag
+  const isDeepseek = /deepseek/i.test(modelName);
 
-  const completion = await groq.chat.completions.create({
+  const systemMsg =
+    sys +
+    "\nRules: Stay strictly in character and speak in first person. Output ONLY the final chat message—no explanations, no translations, no analysis, no <think>. Keep it to 1–2 short sentences.";
+
+  // 1) primary request — DeepSeek gets a single stop '</think>'
+  const primaryReq = {
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    // Groq constraint: stop must be a string OR an array of <= 4 strings
-    ...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:'] } : {}),
     messages: [
-      {
-        role: 'system',
-        content:
-          sys +
-          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
-      },
+      { role: 'system', content: systemMsg },
       { role: 'user', content: userText }
-    ]
-  });
+    ],
+    ...(isDeepseek ? { stop: '</think>' } : {}) // <= gentler stop
+  };
 
-  const raw = completion.choices?.[0]?.message?.content || '';
-  let txt = stripReasoning(raw);
-  txt = clampSentences(txt, 2);
-  return txt || '…';
+  try {
+    const r1 = await groq.chat.completions.create(primaryReq);
+    const raw1 = r1?.choices?.[0]?.message?.content ?? '';
+    let txt1 = clampSentences(stripReasoning(raw1), 2);
+    if (txt1) return txt1;
+
+    // 2) fallback — remove stop entirely, same prompt
+    if (isDeepseek) {
+      const r2 = await groq.chat.completions.create({
+        model: modelName,
+        temperature: 0.7,
+        max_tokens: 80,
+        messages: [
+          { role: 'system', content: systemMsg },
+          { role: 'user', content: userText }
+        ]
+      });
+      const raw2 = r2?.choices?.[0]?.message?.content ?? '';
+      let txt2 = clampSentences(stripReasoning(raw2), 2);
+      if (txt2) return txt2;
+    }
+
+    return '…';
+  } catch (err) {
+    console.error('animeReply error:', err);
+    return '…';
+  }
 }
+
 
 
 
