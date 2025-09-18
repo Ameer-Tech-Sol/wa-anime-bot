@@ -112,31 +112,23 @@ function detectMood(text) {
   return null;
 }
 
-// --- reply post-processing (strip CoT / analysis; keep 1–2 sentences) -------
+// --- reply post-processing (strip CoT, keep 1–2 sentences) -------------------
 function stripReasoning(s = '') {
-  if (!s) return '';
-
-  // Remove DeepSeek-style <think> blocks (even if not closed)
-  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  s = s.replace(/<think>[\s\S]*$/i, '');
-
-  // Remove fenced code blocks (often "analysis" or tool traces)
-  s = s.replace(/```[\s\S]*?```/g, '');
-
-  // If there's a "Final Answer:" section, keep only that
-  const mFA = s.match(/Final Answer:\s*([\s\S]*)/i);
-  if (mFA) s = mFA[1];
-
-  // Nuke common analysis headers
-  s = s.replace(/^(?:\s*(?:analysis|reasoning|thoughts?|explanation|breakdown)\s*:\s*)+/gmi, '');
-
-  // Remove speaker prefixes like “Shahbaz:” / “Assistant:”
-  s = s.replace(/^[A-Za-z][A-Za-z\s]{0,30}:\s+/, '');
-
-  // Collapse whitespace
-  return s.trim();
+  let out = s;
+  // Remove DeepSeek-style thinking and common analysis blocks
+  out = out.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  out = out.replace(/```(?:analysis|reasoning)[\s\S]*?```/gi, '');
+  out = out.replace(/(?<=^|\n)(?:Reasoning:|Analysis:|Thoughts?:)[\s\S]*?(?=\n{2,}|$)/gi, '');
+  // Remove “Final Answer:” prefixes if present
+  out = out.replace(/^\s*(?:Final Answer:|Answer:)\s*/i, '');
+  // Remove speaker-name prefixes like "Shahbaz: "
+  out = out.replace(/^[A-Za-z][A-Za-z\s]{0,30}:\s+/, '');
+  return out.trim();
 }
-
+function clampSentences(s = '', max = 2) {
+  const parts = s.split(/(?<=[.!?])\s+/).filter(Boolean);
+  return parts.slice(0, max).join(' ').trim();
+}
 
 
 // character-specific sticker resolver (with optional fallback)
@@ -157,7 +149,6 @@ function getStickerPath(char, mood) {
 async function animeReply(userText) {
   const sys = characters[activeChar];
   const modelName = getActiveModelName();
-  const isDeepseek = /deepseek/i.test(modelName);
 
   const completion = await groq.chat.completions.create({
     model: modelName,
