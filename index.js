@@ -148,56 +148,70 @@ function getStickerPath(char, mood) {
   return null;
 }
 
-// DeepSeek: gentle stop + fallback; Groq unchanged
 async function animeReply(userText) {
   const sys = characters[activeChar];
   const modelName = getActiveModelName();
   const isDeepseek = /deepseek/i.test(modelName);
 
-  const systemMsg =
-    sys +
-    "\nRules: Stay strictly in character and speak in first person. Output ONLY the final chat message—no explanations, no translations, no analysis, no <think>. Keep it to 1–2 short sentences.";
+  // one tiny style example per character (only used for DeepSeek)
+  const shots = {
+    shahbaz: {
+      u: 'oye',
+      a: 'Beta, bring some respect — warna software update lag jayegi. ⚡'
+    },
+    hinata: {
+      u: 'hello',
+      a: 'H-hello… I-I hope you’re doing well! 🌸'
+    },
+    einstein: {
+      u: 'explain gravity in one line',
+      a: 'Picture space like a trampoline—mass makes a dip, and things roll toward it.'
+    },
+    reina: {
+      u: 'hey',
+      a: 'Tch. Trying to impress me? Cute. Try harder, peasant.'
+    },
+    zafri: {
+      u: 'oye',
+      a: 'Oye oye, tera dimagh offline hai ya trial version? 😂'
+    }
+  };
+  const fs = shots[activeChar] || { u: 'hi', a: 'Okay.' };
 
-  // 1) primary request — DeepSeek gets a single stop '</think>'
-  const primaryReq = {
+  const baseMessages = [
+    {
+      role: 'system',
+      content:
+        sys +
+        "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. Keep it to 1–2 short sentences."
+    },
+    { role: 'user', content: userText }
+  ];
+
+  // For DeepSeek, we add a minimal few-shot BEFORE the real user turn
+  const messages = isDeepseek
+    ? [
+        { role: 'system', content: sys + "\nFollow the style in the example. No explanations. 1–2 short sentences." },
+        { role: 'user', content: fs.u },
+        { role: 'assistant', content: fs.a },
+        { role: 'user', content: userText }
+      ]
+    : baseMessages;
+
+  const completion = await groq.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    messages: [
-      { role: 'system', content: systemMsg },
-      { role: 'user', content: userText }
-    ],
-    ...(isDeepseek ? { stop: '</think>' } : {}) // <= gentler stop
-  };
+    ...(isDeepseek ? { stop: '</think>' } : {}), // gentle stop so it doesn’t dump thinking
+    messages
+  });
 
-  try {
-    const r1 = await groq.chat.completions.create(primaryReq);
-    const raw1 = r1?.choices?.[0]?.message?.content ?? '';
-    let txt1 = clampSentences(stripReasoning(raw1), 2);
-    if (txt1) return txt1;
-
-    // 2) fallback — remove stop entirely, same prompt
-    if (isDeepseek) {
-      const r2 = await groq.chat.completions.create({
-        model: modelName,
-        temperature: 0.7,
-        max_tokens: 80,
-        messages: [
-          { role: 'system', content: systemMsg },
-          { role: 'user', content: userText }
-        ]
-      });
-      const raw2 = r2?.choices?.[0]?.message?.content ?? '';
-      let txt2 = clampSentences(stripReasoning(raw2), 2);
-      if (txt2) return txt2;
-    }
-
-    return '…';
-  } catch (err) {
-    console.error('animeReply error:', err);
-    return '…';
-  }
+  const raw = completion.choices?.[0]?.message?.content || '';
+  let txt = stripReasoning(raw);
+  txt = clampSentences(txt, 2);
+  return txt || '…';
 }
+
 
 
 
