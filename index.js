@@ -146,49 +146,34 @@ function getStickerPath(char, mood) {
   return null;
 }
 
-// replies in-character; DeepSeek gets extra guardrails + stop tokens
 async function animeReply(userText) {
   const sys = characters[activeChar];
-  const modelName = typeof getActiveModelName === 'function'
-    ? getActiveModelName()
-    : 'llama-3.1-8b-instant';
-  const isDeepseek = /deepseek/i.test(modelName);
+  const modelName = getActiveModelName();
 
-  // Strong but small system rule: character voice, short, no think/explain
-  const systemMsg =
-    sys +
-    "\nRules: Stay strictly in character and speak in first person. Output ONLY the final chat message—no explanations, no translations, no analysis, no <think>. Keep it to 1–2 short sentences.";
+  const isDeepseek = /deepseek/i.test(modelName);        // NEW
 
-  // Base request (Groq path unchanged)
-  const req = {
+  const completion = await groq.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
+    ...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:', 'Reasoning:'] } : {}), // NEW
     messages: [
-      { role: 'system', content: systemMsg },
+      {
+        role: 'system',
+        content:
+          sys +
+          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
+      },
       { role: 'user', content: userText }
     ]
-  };
+  });
 
-  // For DeepSeek, cut off chain-of-thought before it appears
-  if (isDeepseek) {
-    req.stop = ['</think>', '<think>', 'Final Answer:', 'Analysis:', 'Reasoning:'];
-  }
-
-  const completion = await groq.chat.completions.create(req);
-  let txt = completion?.choices?.[0]?.message?.content ?? '';
-
-  // ultra-light sanitizer (won’t break anything)
-  txt = txt.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  txt = txt.replace(/<think>[\s\S]*$/i, '');
-  txt = txt.replace(/^.*?(?:Final Answer:)\s*/i, ''); // if model prints “Final Answer:”
-
-  // clamp to 1–2 sentences
-  const sentences = txt.split(/(?<=[.?!])\s+/).filter(Boolean).slice(0, 2);
-  txt = sentences.join(' ').trim();
-
+  const raw = completion.choices?.[0]?.message?.content || '';
+  let txt = stripReasoning(raw);                         // keep your existing sanitizer
+  txt = clampSentences(txt, 2);                          // keep your existing 1–2 sentence clamp
   return txt || '…';
 }
+
 
 
 
