@@ -149,14 +149,14 @@ function getStickerPath(char, mood) {
 async function animeReply(userText) {
   const sys = characters[activeChar];
   const modelName = getActiveModelName();
-
-  const isDeepseek = /deepseek/i.test(modelName);        // NEW
+  const isDeepseek = /deepseek/i.test(modelName);  // <-- correct flag
 
   const completion = await groq.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    ...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:'] } : {}), // NEW
+    // Groq constraint: stop must be a string OR an array of <= 4 strings
+    ...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:'] } : {}),
     messages: [
       {
         role: 'system',
@@ -169,10 +169,11 @@ async function animeReply(userText) {
   });
 
   const raw = completion.choices?.[0]?.message?.content || '';
-  let txt = stripReasoning(raw);                         // keep your existing sanitizer
-  txt = clampSentences(txt, 2);                          // keep your existing 1–2 sentence clamp
+  let txt = stripReasoning(raw);
+  txt = clampSentences(txt, 2);
   return txt || '…';
 }
+
 
 
 
