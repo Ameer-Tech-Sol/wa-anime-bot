@@ -125,8 +125,10 @@ function stripReasoning(s = '') {
   out = out.replace(/^[A-Za-z][A-Za-z\s]{0,30}:\s+/, '');
   return out.trim();
 }
-function clampSentences(s = '', max = 2) {
-  const parts = s.split(/(?<=[.!?])\s+/).filter(Boolean);
+
+// Keep only final 1–2 sentences
+function clampSentences(text = '', max = 2) {
+  const parts = String(text).split(/(?<=[.!?])\s+/).filter(Boolean);
   return parts.slice(0, max).join(' ').trim();
 }
 
