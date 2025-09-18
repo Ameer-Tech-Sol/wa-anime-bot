@@ -146,50 +146,48 @@ function getStickerPath(char, mood) {
   return null;
 }
 
-// minimal, safe tweak: DeepSeek gets stricter system + stop tokens
+// replies in-character; DeepSeek gets extra guardrails + stop tokens
 async function animeReply(userText) {
   const sys = characters[activeChar];
-
-  // whatever you already use to pick the active LLM:
   const modelName = typeof getActiveModelName === 'function'
     ? getActiveModelName()
     : 'llama-3.1-8b-instant';
-
   const isDeepseek = /deepseek/i.test(modelName);
 
-  // Build messages: SAME for both, but with stricter rules in system
-  const messages = [
-    {
-      role: 'system',
-      // ← keep your character prompt, then tighten the rules
-      content:
-        sys +
-        "\nRules: You are speaking AS this character in first-person. Reply with ONLY the final in-character message. " +
-        "Never include analysis, thoughts, or <think> blocks. Keep it short: 1–2 sentences max."
-    },
-    { role: 'user', content: userText }
-  ];
+  // Strong but small system rule: character voice, short, no think/explain
+  const systemMsg =
+    sys +
+    "\nRules: Stay strictly in character and speak in first person. Output ONLY the final chat message—no explanations, no translations, no analysis, no <think>. Keep it to 1–2 short sentences.";
 
-  // Base request stays the same as your code
+  // Base request (Groq path unchanged)
   const req = {
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    messages
+    messages: [
+      { role: 'system', content: systemMsg },
+      { role: 'user', content: userText }
+    ]
   };
 
-  // ONLY for DeepSeek: add stop tokens to prevent chain-of-thought / analysis
+  // For DeepSeek, cut off chain-of-thought before it appears
   if (isDeepseek) {
     req.stop = ['</think>', '<think>', 'Final Answer:', 'Analysis:', 'Reasoning:'];
   }
 
-  // Call Groq as you already do
   const completion = await groq.chat.completions.create(req);
+  let txt = completion?.choices?.[0]?.message?.content ?? '';
 
-  // Use your existing post-processing (keep whatever you had)
-  const raw = completion?.choices?.[0]?.message?.content?.trim?.() || '';
-  // If you already have strip/clamp helpers, they’ll still run; if not, this is harmless:
-  return raw || '…';
+  // ultra-light sanitizer (won’t break anything)
+  txt = txt.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  txt = txt.replace(/<think>[\s\S]*$/i, '');
+  txt = txt.replace(/^.*?(?:Final Answer:)\s*/i, ''); // if model prints “Final Answer:”
+
+  // clamp to 1–2 sentences
+  const sentences = txt.split(/(?<=[.?!])\s+/).filter(Boolean).slice(0, 2);
+  txt = sentences.join(' ').trim();
+
+  return txt || '…';
 }
 
 
