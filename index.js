@@ -148,69 +148,71 @@ function getStickerPath(char, mood) {
   return null;
 }
 
+// tiny style sample for DeepSeek priming
+function primerFromChar(char) {
+  switch (char) {
+    case 'shahbaz':
+      return 'Beta, seedhi baat karo — warna software update taiyar hai.'; // short, in-character
+    case 'hinata':
+      return 'H-hello… um, I believe in you. (gentle, shy, very brief)';
+    case 'einstein':
+      return 'Let’s keep it simple and precise—one clear point, no fluff.';
+    case 'reina':
+      return 'Tch. Try to keep up, peasant. (short, sharp, tsundere)';
+    case 'zafri':
+      return 'Chal oye, itni slow processing? RAM te dhoyee hoyee lagdi ae!'; // playful juggat vibe
+    default:
+      return 'Speak briefly, in first person, as this character.';
+  }
+}
+
+// replies in-character; Groq unchanged; DeepSeek gets a style primer
 async function animeReply(userText) {
-  const sys = characters[activeChar];
+  const sysPersona = characters[activeChar];
   const modelName = getActiveModelName();
   const isDeepseek = /deepseek/i.test(modelName);
 
-  // one tiny style example per character (only used for DeepSeek)
-  const shots = {
-    shahbaz: {
-      u: 'oye',
-      a: 'Beta, bring some respect — warna software update lag jayegi. ⚡'
-    },
-    hinata: {
-      u: 'hello',
-      a: 'H-hello… I-I hope you’re doing well! 🌸'
-    },
-    einstein: {
-      u: 'explain gravity in one line',
-      a: 'Picture space like a trampoline—mass makes a dip, and things roll toward it.'
-    },
-    reina: {
-      u: 'hey',
-      a: 'Tch. Trying to impress me? Cute. Try harder, peasant.'
-    },
-    zafri: {
-      u: 'oye',
-      a: 'Oye oye, tera dimagh offline hai ya trial version? 😂'
-    }
-  };
-  const fs = shots[activeChar] || { u: 'hi', a: 'Okay.' };
+  const systemMsg =
+    sysPersona +
+    "\nHard rules: Stay strictly in character and speak in first person. " +
+    "Reply in the SAME LANGUAGE the user used. Output ONLY the final chat message—" +
+    "no explanations, no translations, no analysis, no meta, no <think>. " +
+    "Keep it to 1–2 short sentences, maximum.";
 
-  const baseMessages = [
-    {
-      role: 'system',
-      content:
-        sys +
-        "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. Keep it to 1–2 short sentences."
-    },
+  // Base messages for Groq (unchanged)
+  let messages = [
+    { role: 'system', content: systemMsg },
     { role: 'user', content: userText }
   ];
 
-  // For DeepSeek, we add a minimal few-shot BEFORE the real user turn
-  const messages = isDeepseek
-    ? [
-        { role: 'system', content: sys + "\nFollow the style in the example. No explanations. 1–2 short sentences." },
-        { role: 'user', content: fs.u },
-        { role: 'assistant', content: fs.a },
-        { role: 'user', content: userText }
-      ]
-    : baseMessages;
+  // DeepSeek: add a one-line sample BEFORE the user to anchor the style
+  if (isDeepseek) {
+    messages = [
+      { role: 'system', content: systemMsg },
+      { role: 'assistant', content: primerFromChar(activeChar) + "  (style sample — do NOT repeat this literally.)" },
+      { role: 'user', content: userText }
+    ];
+  }
+
+  // Gentle: no stop tokens unless you still want to suppress <think>
+  // (leaving them out avoids empty replies). If you really want one, use:
+  // const extra = isDeepseek ? { stop: '</think>' } : {};
+  const extra = {};
 
   const completion = await groq.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    ...(isDeepseek ? { stop: '</think>' } : {}), // gentle stop so it doesn’t dump thinking
+    ...extra,
     messages
   });
 
   const raw = completion.choices?.[0]?.message?.content || '';
-  let txt = stripReasoning(raw);
-  txt = clampSentences(txt, 2);
+  let txt = stripReasoning(raw);       // you already have this helper
+  txt = clampSentences(txt, 2);        // and this one too
   return txt || '…';
 }
+
 
 
 
