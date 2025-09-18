@@ -67,7 +67,6 @@ let activeChar = 'shahbaz';
 const BOT_START_TS = Math.floor(Date.now() / 1000); // WhatsApp timestamps are in seconds
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const deepseek = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // --- character aliasing ------------------------------------------------------
 const aliasMap = {
@@ -154,7 +153,7 @@ async function animeReply(userText) {
   const modelName = getActiveModelName();
 
 
-  const completion = await deepseek.chat.completions.create({
+  const completion = await groq.chat.completions.create({
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
