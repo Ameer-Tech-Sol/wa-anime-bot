@@ -165,20 +165,6 @@ async function animeReply(userText) {
     ]
   });
 
-  const DeepSeekcompletion = await deepseek.chat.completions.create({
-    model: modelName,
-    temperature: 0.7,
-    max_tokens: 80,
-    messages: [
-      {
-        role: 'system',
-        content:
-          sys +
-          "\nRules: Speak in first person as the character. Output ONLY the final message for the chat. Never include analysis, reasoning, thoughts, or <think> blocks. 1–2 sentences max. Be concise and direct."
-      },
-      { role: 'user', content: userText }
-    ]
-  });
 
 
 
