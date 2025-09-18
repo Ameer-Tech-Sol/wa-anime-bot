@@ -156,7 +156,7 @@ async function animeReply(userText) {
     model: modelName,
     temperature: 0.7,
     max_tokens: 80,
-    //...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:', 'Reasoning:'] } : {}), // NEW
+    ...(isDeepseek ? { stop: ['</think>', '<think>', 'Final Answer:', 'Analysis:'] } : {}), // NEW
     messages: [
       {
         role: 'system',
