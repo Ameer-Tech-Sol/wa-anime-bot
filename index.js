@@ -1202,6 +1202,38 @@ if (lower.startsWith('!play')) {
 }
 
 
+// --- Admin debug (temporary) -------------------------------------------------
+if (lower === '!admindebug') {
+  if (!from.endsWith('@g.us')) {
+    await sock.sendMessage(from, { text: 'Group only.' }, { quoted: msg });
+    return;
+  }
+  try {
+    const md = await sock.groupMetadata(from);
+    const adminsRaw = (md.participants || [])
+      .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+      .map(p => p.id);
+    const adminsNorm = adminsRaw.map(normalizeJid);
+
+    const callerRaw =
+      msg?.key?.participant ||
+      msg?.participant ||
+      msg?.sender ||
+      msg?.key?.remoteJid;
+    const callerNorm = normalizeJid(callerRaw);
+
+    const report =
+      `Admins (raw):\n${adminsRaw.join('\n') || '(none)'}\n\n` +
+      `Admins (norm):\n${adminsNorm.join('\n') || '(none)'}\n\n` +
+      `Caller raw: ${callerRaw}\nCaller norm: ${callerNorm}`;
+
+    await sock.sendMessage(from, { text: report }, { quoted: msg });
+  } catch (e) {
+    console.error('[ADMINS DEBUG]', e?.message || e);
+    await sock.sendMessage(from, { text: 'Failed to read group metadata.' }, { quoted: msg });
+  }
+  return;
+}
 
 
 
