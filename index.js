@@ -27,6 +27,21 @@ function setChatMode(chatId, on) { chatModeByChat.set(chatId, on); }
 function isChatOn(chatId) { return chatModeByChat.get(chatId) === true; }
 
 
+// === Games per chat (we support one table per group chat) ====================
+const gamesByChat = new Map();
+// gamesByChat.get(chatJid) = {
+//   type: 'bhabhi',
+//   phase: 'lobby' | 'dealing' | 'playing' | 'ended',
+//   players: [ { jid, name, hand: [] } ],
+//   turnIndex: 0,
+//   leadSuit: null,
+//   trick: [],   // [{ jid, card }]
+//   shoe: [],    // not typically used in Bhabhi (we deal all)
+//   discard: [], // completed tricks history (optional)
+// }
+
+
+
 // --- Model switcher (Groq) ---------------------------------------------------
 const MODEL_REGISTRY = {
   'groq-8b': 'llama-3.1-8b-instant',
@@ -181,10 +196,52 @@ async function animeReply(userText) {
   return txt || '…';
 }
 
+// === Bhabhi (Get Away) — core card helpers ==================================
+// Suits: Clubs (C), Diamonds (D), Hearts (H), Spades (S)
+const SUITS = ['C','D','H','S'];
+const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']; // low→high
+
+function createDeck52() {
+  const deck = [];
+  for (const s of SUITS) for (const r of RANKS) deck.push(`${r}${s}`);
+  return deck;
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function cardSuit(card) { return card.slice(-1); }
+function cardRank(card) { return card.slice(0, -1); }
+function rankValue(r) { return RANKS.indexOf(r); }
+
+// pretty helper for names
+function shortName(pushName, pushJid) {
+  return pushName || (pushJid?.split('@')[0] ?? 'player');
+}
 
 
+function newBhabhiGame(chatJid) {
+  return {
+    chat: chatJid,
+    type: 'bhabhi',
+    phase: 'lobby',       // 'lobby' | 'dealing' | 'playing' | 'ended'
+    players: [],          // { jid, name, hand: [] }
+    turnIndex: 0,
+    leadSuit: null,
+    trick: [],            // [{ jid, card }]
+    shoe: [],             // (not used in Bhabhi; we deal full deck)
+    discard: [],          // completed tricks (optional history)
+  };
+}
 
-
+function findPlayer(game, jid) {
+  return game.players.find(p => p.jid === jid);
+}
 
 
 
@@ -646,6 +703,68 @@ if (lower.startsWith('.dl ')) {
           return;
         }
       }
+
+
+      // --- Bhabhi: create a new lobby in this chat --------------------------------
+if (lower === '!bhabhi new' || lower === '!bhabhi start') {
+  const existing = gamesByChat.get(from);
+  if (existing && existing.phase !== 'ended') {
+    await sock.sendMessage(from, { text: 'A Bhabhi game already exists in this chat. Type "!bhabhi end" to end it, or "!bhabhi status" to view it.' }, { quoted: msg });
+    return;
+  }
+  const game = newBhabhiGame(from);
+  gamesByChat.set(from, game);
+  await sock.sendMessage(from, { text: '🃏 Bhabhi lobby created!\nPlayers: (none)\nJoin with "!join". When ready, host can type "!bdeal" to deal.' }, { quoted: msg });
+  return;
+}
+
+// --- Bhabhi: join the current lobby -----------------------------------------
+if (lower === '!join') {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi' || game.phase !== 'lobby') {
+    await sock.sendMessage(from, { text: 'No Bhabhi lobby here. Start one with "!bhabhi new".' }, { quoted: msg });
+    return;
+  }
+  const jid = (msg.key.participant || msg.key.remoteJid);
+  if (findPlayer(game, jid)) {
+    await sock.sendMessage(from, { text: 'You are already in.' }, { quoted: msg });
+    return;
+  }
+  const name = shortName(m?.pushName, jid);
+  game.players.push({ jid, name, hand: [] });
+  const names = game.players.map(p => `@${p.name}`).join(', ');
+  await sock.sendMessage(from, { text: `Joined! Current players: ${names}\nHost can type "!bdeal" when ready.`, mentions: game.players.map(p => p.jid) }, { quoted: msg });
+  return;
+}
+
+// --- Bhabhi: lobby status ----------------------------------------------------
+if (lower === '!bhabhi status') {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi') {
+    await sock.sendMessage(from, { text: 'No Bhabhi game in this chat.' }, { quoted: msg });
+    return;
+  }
+  const names = game.players.length ? game.players.map(p => `@${p.name}`).join(', ') : '(none)';
+  await sock.sendMessage(from, { text: `Game: Bhabhi\nPhase: ${game.phase}\nPlayers: ${names}\nCommands: "!join", then host "!bdeal".`, mentions: game.players.map(p => p.jid) }, { quoted: msg });
+  return;
+}
+
+// --- Bhabhi: end (hard stop) -------------------------------------------------
+if (lower === '!bhabhi end') {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi') {
+    await sock.sendMessage(from, { text: 'No Bhabhi game to end.' }, { quoted: msg });
+    return;
+  }
+  game.phase = 'ended';
+  gamesByChat.delete(from);
+  await sock.sendMessage(from, { text: 'Game ended.' }, { quoted: msg });
+  return;
+}
+
+
+
+
       
       // Only chat if chat-mode is ON
       if (!isChatOn(from)) return;
