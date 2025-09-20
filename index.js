@@ -273,6 +273,79 @@ function findPlayer(game, jid) {
 }
 
 
+// --- Bhabhi rules/helpers: turn order, legality, trick resolution ------------
+
+// Who’s still in? (players who still hold ≥1 card)
+function activeSeatIdxs(game) {
+  const idxs = [];
+  for (let i = 0; i < game.players.length; i++) {
+    if (game.players[i].hand && game.players[i].hand.length > 0) idxs.push(i);
+  }
+  return idxs;
+}
+
+// Move to next seat that still has cards
+function nextTurnIdx(game, fromIdx) {
+  const n = game.players.length;
+  let i = fromIdx;
+  for (let step = 0; step < n; step++) {
+    i = (i + 1) % n;
+    if (game.players[i].hand && game.players[i].hand.length > 0) return i;
+  }
+  return fromIdx; // fallback (shouldn’t happen if at least 2 active)
+}
+
+// Remove a specific card string from a hand; return true if removed
+function removeCardFromHand(hand, card) {
+  const pos = hand.indexOf(card);
+  if (pos === -1) return false;
+  hand.splice(pos, 1);
+  return true;
+}
+
+function playerHasSuit(hand, suit) {
+  return hand.some(c => cardSuit(c) === suit);
+}
+
+// Bhabhi legality: must follow leadSuit if you can; otherwise you may discard any card
+function isLegalPlay(game, seatIdx, card) {
+  const hand = game.players[seatIdx].hand;
+  if (!hand.includes(card)) return { ok: false, why: 'Card not in hand' };
+  if (game.leadSuit == null) return { ok: true }; // leader can lead any suit
+  const suit = cardSuit(card);
+  if (suit === game.leadSuit) return { ok: true };
+  if (playerHasSuit(hand, game.leadSuit)) return { ok: false, why: `Must follow ${game.leadSuit}` };
+  return { ok: true };
+}
+
+// When a trick completes, highest card of the lead suit wins.
+// Return { winnerIdx, winningCard }
+function resolveTrick(game) {
+  const lead = game.leadSuit;
+  let bestIdx = -1;
+  let bestVal = -1;
+  let bestCard = null;
+  for (const entry of game.trick) {
+    const { seatIdx, card } = entry; // we will store seatIdx in trick entries
+    if (cardSuit(card) !== lead) continue;
+    const val = rankValue(cardRank(card));
+    if (val > bestVal) {
+      bestVal = val;
+      bestIdx = seatIdx;
+      bestCard = card;
+    }
+  }
+  return { winnerIdx: bestIdx, winningCard: bestCard };
+}
+
+// Build a compact “table” line for the current trick
+function formatTrickLine(game) {
+  if (!game.trick || game.trick.length === 0) return 'No cards on table.';
+  const parts = game.trick.map(({ seatIdx, card }) => `@${game.players[seatIdx].name}:${card}`);
+  return parts.join('  ');
+}
+
+
 
 
 // --- Tenor helper ------------------------------------------------------------
@@ -873,6 +946,175 @@ if (lower === '!bdeal') {
 
   return;
 }
+
+
+// --- Bhabhi: DM my current hand ---------------------------------------------
+if (lower === '!hand') {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi') {
+    await sock.sendMessage(from, { text: 'No Bhabhi game here.' }, { quoted: msg });
+    return;
+  }
+  const jid = msg?.key?.participant || msg?.participant || msg?.sender || msg?.key?.remoteJid;
+  const seatIdx = game.players.findIndex(p => p.jid === jid);
+  if (seatIdx < 0) {
+    await sock.sendMessage(from, { text: 'You are not seated in this game. Use "!join" in lobby.' }, { quoted: msg });
+    return;
+  }
+  const hand = game.players[seatIdx].hand || [];
+  const handText = hand.length ? hand.join(' ') : '(empty)';
+  try {
+    await sock.sendMessage(jid, { text: `Your hand:\n${handText}` });
+  } catch (e) {
+    console.error('[BHABHI !hand DM FAIL]', jid, e?.message || e);
+    await sock.sendMessage(from, { text: `Could not DM you. (Is this a dedicated bot number?)` }, { quoted: msg });
+  }
+  return;
+}
+
+
+// --- Bhabhi: play a card -----------------------------------------------------
+if (lower.startsWith('!play')) {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi' || game.phase !== 'playing') {
+    await sock.sendMessage(from, { text: 'No active Bhabhi round. Use "!bhabhi new", "!join", then "!bdeal".' }, { quoted: msg });
+    return;
+  }
+
+  // Extract caller seat
+  const jid = msg?.key?.participant || msg?.participant || msg?.sender || msg?.key?.remoteJid;
+  const seatIdx = game.players.findIndex(p => p.jid === jid);
+  if (seatIdx < 0) {
+    await sock.sendMessage(from, { text: 'You are not seated in this game.' }, { quoted: msg });
+    return;
+  }
+
+  // Parse card from text: allow forms like "7d", "10h", "QH", "q h"
+  const parts = messageText.trim().split(/\s+/);
+  // !play <card>
+  if (parts.length < 2) {
+    await sock.sendMessage(from, { text: 'Usage: !play <card>   e.g., !play 7D or !play 10H or !play QS' }, { quoted: msg });
+    return;
+  }
+  const rawCard = parts[1].toUpperCase().replace(/[^0-9JQKACDHS]/g, ''); // keep digits/letters
+  // Normalize: ensure last char is suit; rank is the rest
+  const suitChar = rawCard.slice(-1);
+  const rankPart = rawCard.slice(0, -1).replace(/^T$/, '10').replace(/^10$/, '10');
+  const card = `${rankPart}${suitChar}`;
+  const validCard = SUITS.includes(suitChar) && RANKS.includes(rankPart);
+  if (!validCard) {
+    await sock.sendMessage(from, { text: 'Invalid card. Examples: 7D, 10H, QS, AC' }, { quoted: msg });
+    return;
+  }
+
+  // Turn enforcement
+  if (game.turnIndex !== seatIdx) {
+    const whose = `@${game.players[game.turnIndex].name}`;
+    await sock.sendMessage(from, { text: `Not your turn. Turn: ${whose}`, mentions: [game.players[game.turnIndex].jid] }, { quoted: msg });
+    return;
+  }
+
+  // Legality check (follow suit if can)
+  const legal = isLegalPlay(game, seatIdx, card);
+  if (!legal.ok) {
+    await sock.sendMessage(from, { text: `Illegal move: ${legal.why}` }, { quoted: msg });
+    return;
+  }
+
+  // On first card of a trick, set lead suit and capture who is expected to play this trick
+  if (!game.trick || game.trick.length === 0) {
+    game.leadSuit = cardSuit(card);
+    // Freeze the set of participants for this trick (seats that have ≥1 card at trick start)
+    game.trickParticipants = game.players
+      .map((p, i) => ({ i, n: p.hand?.length || 0 }))
+      .filter(o => o.n > 0)
+      .map(o => o.i);
+  }
+
+  // Apply move: remove from hand, push to trick
+  const removed = removeCardFromHand(game.players[seatIdx].hand, card);
+  if (!removed) {
+    await sock.sendMessage(from, { text: `You don't hold ${card}.` }, { quoted: msg });
+    return;
+  }
+  game.trick = game.trick || [];
+  game.trick.push({ seatIdx, card });
+
+  // Announce play & table
+  const tableLine = formatTrickLine(game);
+  await sock.sendMessage(
+    from,
+    { text: `@${game.players[seatIdx].name} played ${card}\nTable: ${tableLine}`, mentions: [game.players[seatIdx].jid] },
+    { quoted: msg }
+  );
+
+  // Has the trick completed?
+  const needed = (game.trickParticipants && game.trickParticipants.length) ? game.trickParticipants.length : game.players.filter(p => (p.hand && p.hand.length >= 0)).length;
+  if (game.trick.length >= needed) {
+    // Resolve trick
+    const { winnerIdx, winningCard } = resolveTrick(game);
+    if (winnerIdx < 0) {
+      // Shouldn’t happen; fallback: leader takes it
+      console.warn('[BHABHI] resolveTrick winnerIdx<0, fallback to leader');
+      game.discard.push(game.trick.slice());
+      game.trick = [];
+      game.leadSuit = null;
+      // leader unchanged
+    } else {
+      game.discard.push(game.trick.slice());
+      game.trick = [];
+      const winnerName = `@${game.players[winnerIdx].name}`;
+      await sock.sendMessage(
+        from,
+        { text: `Trick won by ${winnerName} with ${winningCard}` , mentions: [game.players[winnerIdx].jid] },
+        { quoted: msg }
+      );
+      // Next leader is winner
+      game.turnIndex = winnerIdx;
+      game.leadSuit = null;
+    }
+
+    // Check if round ended (all but one player empty means someone has cards; in Bhabhi, continue until a single holder?)
+    const stillHolding = game.players.filter(p => (p.hand && p.hand.length > 0)).length;
+    if (stillHolding <= 1) {
+      // End round
+      game.phase = 'ended';
+      const holders = game.players
+        .map((p, i) => ({ i, name: p.name, n: p.hand.length }))
+        .filter(o => o.n > 0);
+      const summary = holders.length
+        ? `Last with cards: @${holders[0].name} (${holders[0].n})`
+        : 'All hands empty.';
+      await sock.sendMessage(
+        from,
+        { text: `Round over. ${summary}\nType "!bhabhi new" for a new lobby.` , mentions: holders.map(o => game.players[o.i].jid) },
+        { quoted: msg }
+      );
+      return;
+    }
+
+    // Prompt next player (winner leads)
+    const nextSeat = game.turnIndex;
+    await sock.sendMessage(
+      from,
+      { text: `Turn: @${game.players[nextSeat].name}` , mentions: [game.players[nextSeat].jid] },
+      { quoted: msg }
+    );
+
+    return;
+  }
+
+  // Trick not yet complete → advance turn to next seat with cards
+  const nextIdx = nextTurnIdx(game, seatIdx);
+  game.turnIndex = nextIdx;
+  await sock.sendMessage(
+    from,
+    { text: `Turn: @${game.players[nextIdx].name}` , mentions: [game.players[nextIdx].jid] },
+    { quoted: msg }
+  );
+  return;
+}
+
 
 
 
