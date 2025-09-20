@@ -219,6 +219,35 @@ function cardSuit(card) { return card.slice(-1); }
 function cardRank(card) { return card.slice(0, -1); }
 function rankValue(r) { return RANKS.indexOf(r); }
 
+// --- Bhabhi helpers: sort, deal, dealer/leader -------------------------------
+function sortHand(cards) {
+  // suit order: C, D, H, S ; rank: 2..A
+  const suitOrder = { C:0, D:1, H:2, S:3 };
+  return cards.sort((a, b) => {
+    const sa = suitOrder[cardSuit(a)], sb = suitOrder[cardSuit(b)];
+    if (sa !== sb) return sa - sb;
+    return rankValue(cardRank(a)) - rankValue(cardRank(b));
+  });
+}
+
+function dealEvenlyRoundRobin(deck, players) {
+  // Clear hands first (safety)
+  for (const p of players) p.hand = [];
+  // Deal one-by-one to each seat until deck is empty
+  let i = 0;
+  for (const c of deck) {
+    players[i % players.length].hand.push(c);
+    i++;
+  }
+  // Keep each hand tidy for readability in DMs
+  for (const p of players) sortHand(p.hand);
+}
+
+function pickRandomDealerIdx(n) {
+  return Math.floor(Math.random() * n);
+}
+
+
 // pretty helper for names
 function shortName(pushName, pushJid) {
   return pushName || (pushJid?.split('@')[0] ?? 'player');
@@ -786,6 +815,65 @@ if (lower === '!bhabhi end') {
   await sock.sendMessage(from, { text: 'Game ended.' }, { quoted: msg });
   return;
 }
+
+// --- Bhabhi: deal the deck and start the round --------------------------------
+if (lower === '!bdeal') {
+  const game = gamesByChat.get(from);
+  if (!game || game.type !== 'bhabhi') {
+    await sock.sendMessage(from, { text: 'No Bhabhi game here. Start with "!bhabhi new".' }, { quoted: msg });
+    return;
+  }
+  if (game.phase !== 'lobby') {
+    await sock.sendMessage(from, { text: `Cannot deal now (phase = ${game.phase}).` }, { quoted: msg });
+    return;
+  }
+  if (game.players.length < 2) {
+    await sock.sendMessage(from, { text: 'Need at least 2 players to deal. Ask friends to "!join".' }, { quoted: msg });
+    return;
+  }
+
+  // 1) build & shuffle deck
+  const deck = shuffleInPlace(createDeck52());
+
+  // 2) deal round-robin (helpers already clear hands & sort them)
+  dealEvenlyRoundRobin(deck, game.players);
+
+  // 3) choose a dealer and leader (leader = next seat after dealer)
+  const dealerIdx = pickRandomDealerIdx(game.players.length);
+  const leaderIdx = (dealerIdx + 1) % game.players.length;
+  game.turnIndex = leaderIdx;
+  game.phase = 'playing';
+  game.leadSuit = null;
+  game.trick = [];
+  game.discard = [];
+
+  // 4) DM hands (sequential to be gentle on rate limits)
+  for (const p of game.players) {
+    const handText = p.hand.join(' ');
+    try {
+      await sock.sendMessage(p.jid, { text: `Your Bhabhi hand:\n${handText}\n\n(Play will happen in the group.)` });
+    } catch (e) {
+      console.error('[BHABHI DM FAIL]', p.jid, e?.message || e);
+    }
+  }
+
+  // 5) Announce counts + dealer/leader in group
+  const counts = game.players.map((p, i) =>
+    `${i === dealerIdx ? '(Dealer) ' : ''}${i === leaderIdx ? '➡️ ' : ''}@${p.name}: ${p.hand.length}`
+  ).join('\n');
+
+  await sock.sendMessage(
+    from,
+    {
+      text: `🃏 Dealt ${game.players.length} players.\n${counts}\n\nTurn: @${game.players[leaderIdx].name}`,
+      mentions: game.players.map(p => p.jid)
+    },
+    { quoted: msg }
+  );
+
+  return;
+}
+
 
 
 
