@@ -41,6 +41,45 @@ const gamesByChat = new Map();
 // }
 
 
+// === Group admins cache ======================================================
+// Cache admins per group to avoid hitting metadata on every command
+const groupAdminsCache = new Map(); // groupJid -> { at: ms, admins: Set<jid> }
+const ADMINS_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function refreshGroupAdmins(groupJid) {
+  try {
+    const now = Date.now();
+    const cached = groupAdminsCache.get(groupJid);
+    if (cached && (now - cached.at) < ADMINS_TTL_MS) return cached.admins;
+
+    // Fetch metadata
+    const md = await sock.groupMetadata(groupJid);
+    // Baileys participants: { id, admin?: 'admin'|'superadmin'|undefined }
+    const admins = new Set(
+      (md.participants || [])
+        .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+        .map(p => p.id)
+    );
+
+    const entry = { at: now, admins };
+    groupAdminsCache.set(groupJid, entry);
+    return admins;
+  } catch (e) {
+    console.error('[ADMINS] refresh failed for', groupJid, e?.message || e);
+    // fall back to previous cache if any
+    return groupAdminsCache.get(groupJid)?.admins || new Set();
+  }
+}
+
+async function isGroupAdmin(groupJid, userJid) {
+  // Only meaningful in groups (@g.us)
+  if (!groupJid.endsWith('@g.us')) return false;
+  const admins = await refreshGroupAdmins(groupJid);
+  return admins.has(userJid);
+}
+
+
+
 
 // --- Model switcher (Groq) ---------------------------------------------------
 const MODEL_REGISTRY = {
@@ -553,11 +592,50 @@ async function start() {
 
       // --- start/stop controls (work even when paused) ---
       if (lower === '!start') {
+        // Admin-only in groups
+        if (from.endsWith('@g.us')) {
+          const callerJid =
+            msg?.key?.participant ||
+            msg?.participant ||
+            msg?.sender ||
+            msg?.key?.remoteJid;
+          const ok = await isGroupAdmin(from, callerJid);
+          if (!ok) {
+            await sock.sendMessage(
+              from,
+              { text: 'Only group admins can run !start.' },
+              { quoted: msg }
+            );
+            return;
+          }
+        }
+        // (non-group chats fall through unchanged)
+
         setActive(from, true);
         await sock.sendMessage(from, { text: '✅ active' }, { quoted: msg });
         return;
       }
+      
       if (lower === '!end') {
+        // Admin-only in groups
+        if (from.endsWith('@g.us')) {
+          const callerJid =
+            msg?.key?.participant ||
+            msg?.participant ||
+            msg?.sender ||
+            msg?.key?.remoteJid;
+          const ok = await isGroupAdmin(from, callerJid);
+          if (!ok) {
+            await sock.sendMessage(
+              from,
+              { text: 'Only group admins can run !end.' },
+              { quoted: msg }
+            );
+            return;
+          }
+        }
+        // (non-group chats fall through unchanged)
+
         setActive(from, false);
         await sock.sendMessage(from, { text: '⏸️ paused' }, { quoted: msg });
         return;
