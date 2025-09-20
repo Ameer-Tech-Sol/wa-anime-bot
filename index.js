@@ -725,17 +725,44 @@ if (lower === '!join') {
     await sock.sendMessage(from, { text: 'No Bhabhi lobby here. Start one with "!bhabhi new".' }, { quoted: msg });
     return;
   }
-  const jid = (msg.key.participant || msg.key.remoteJid);
+
+  // Robust participant/JID + display name extraction for groups
+  const jid =
+    msg?.key?.participant ||
+    msg?.participant ||
+    msg?.sender ||
+    msg?.key?.remoteJid; // last-ditch fallback (DMs)
+
+  if (!jid) {
+    await sock.sendMessage(from, { text: 'Could not detect your JID. Try sending "!join" again.' }, { quoted: msg });
+    return;
+  }
+
   if (findPlayer(game, jid)) {
     await sock.sendMessage(from, { text: 'You are already in.' }, { quoted: msg });
     return;
   }
-  const name = shortName(m?.pushName, jid);
-  game.players.push({ jid, name, hand: [] });
+
+  // Prefer the message's pushName (works in groups), fallback to bare number
+  const displayName =
+    (typeof m?.pushName === 'string' && m.pushName.trim()) ? m.pushName.trim()
+    : (typeof msg?.pushName === 'string' && msg.pushName.trim()) ? msg.pushName.trim()
+    : (jid.split('@')[0]);
+
+  game.players.push({ jid, name: displayName, hand: [] });
+
   const names = game.players.map(p => `@${p.name}`).join(', ');
-  await sock.sendMessage(from, { text: `Joined! Current players: ${names}\nHost can type "!bdeal" when ready.`, mentions: game.players.map(p => p.jid) }, { quoted: msg });
+  await sock.sendMessage(
+    from,
+    {
+      text: `Joined! Current players: ${names}\nHost can type "!bdeal" when ready.`,
+      mentions: game.players.map(p => p.jid)
+    },
+    { quoted: msg }
+  );
   return;
 }
+
 
 // --- Bhabhi: lobby status ----------------------------------------------------
 if (lower === '!bhabhi status') {
