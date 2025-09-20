@@ -58,7 +58,7 @@ async function refreshGroupAdmins(groupJid) {
     const admins = new Set(
       (md.participants || [])
         .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
-        .map(p => p.id)
+        .map(p => normalizeJid(p.id))
     );
 
     const entry = { at: now, admins };
@@ -75,8 +75,16 @@ async function isGroupAdmin(groupJid, userJid) {
   // Only meaningful in groups (@g.us)
   if (!groupJid.endsWith('@g.us')) return false;
   const admins = await refreshGroupAdmins(groupJid);
-  return admins.has(userJid);
+  return admins.has(normalizeJid(userJid));
 }
+
+// Normalize any WhatsApp JID to base form: 92300xxxxxxx@s.whatsapp.net
+function normalizeJid(j) {
+  if (!j) return null;
+  const base = j.split('@')[0].split(':')[0]; // strip @domain and :device
+  return `${base}@s.whatsapp.net`;
+}
+
 
 
 
