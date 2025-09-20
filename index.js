@@ -744,10 +744,8 @@ if (lower === '!join') {
   }
 
   // Prefer the message's pushName (works in groups), fallback to bare number
-  const displayName =
-    (typeof m?.pushName === 'string' && m.pushName.trim()) ? m.pushName.trim()
-    : (typeof msg?.pushName === 'string' && msg.pushName.trim()) ? msg.pushName.trim()
-    : (jid.split('@')[0]);
+  const displayName = shortName(msg?.pushName, jid);
+
 
   game.players.push({ jid, name: displayName, hand: [] });
 
