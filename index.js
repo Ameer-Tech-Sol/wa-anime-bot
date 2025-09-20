@@ -20,6 +20,13 @@ const activeByChat = new Map(); // default OFF on boot
 function setActive(chatId, on) { activeByChat.set(chatId, on); }
 function isActive(chatId) { return activeByChat.get(chatId) === true; }
 
+// --- Chat mode (per chat) ---
+// default OFF on boot: the bot will only chat when you enable it with !chat on
+const chatModeByChat = new Map();
+function setChatMode(chatId, on) { chatModeByChat.set(chatId, on); }
+function isChatOn(chatId) { return chatModeByChat.get(chatId) === true; }
+
+
 // --- Model switcher (Groq) ---------------------------------------------------
 const MODEL_REGISTRY = {
   'groq-8b': 'llama-3.1-8b-instant',
@@ -397,6 +404,24 @@ async function start() {
         return;
       }
 
+      // --- chat mode: !chat on / !chat off / !chat (status) ---
+      if (lower === '!chat on') {
+        setChatMode(from, true);
+        await sock.sendMessage(from, { text: '💬 Chat mode: ON' }, { quoted: msg });
+        return;
+      }
+      if (lower === '!chat off') {
+        setChatMode(from, false);
+        await sock.sendMessage(from, { text: '🔇 Chat mode: OFF' }, { quoted: msg });
+        return;
+      }
+      if (lower === '!chat') {
+        const on = isChatOn(from);
+        await sock.sendMessage(from, { text: `Chat mode is ${on ? 'ON' : 'OFF'}. Use "!chat on" or "!chat off".` }, { quoted: msg });
+        return;
+      }
+
+
       // --- model commands: !model / !model list / !model set <name> ----------
       if (lower === '!model' || lower === '!model list') {
         const lines = Object.keys(MODEL_REGISTRY).map(k => k === currentModel ? `• ${k} (active)` : `• ${k}`);
@@ -622,6 +647,8 @@ if (lower.startsWith('.dl ')) {
         }
       }
       
+      // Only chat if chat-mode is ON
+      if (!isChatOn(from)) return;
 
 
 
