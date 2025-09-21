@@ -326,8 +326,15 @@ function newBhabhiGame(chatJid) {
 }
 
 function findPlayer(game, jid) {
-  return game.players.find(p => p.jid === jid);
+  const target = normalizeJid(jid);
+  return game.players.find(p => normalizeJid(p.jid) === target);
 }
+
+function seatIndex(game, jid) {
+  const target = normalizeJid(jid);
+  return game.players.findIndex(p => normalizeJid(p.jid) === target);
+}
+
 
 
 // --- Bhabhi rules/helpers: turn order, legality, trick resolution ------------
@@ -979,11 +986,7 @@ if (lower === '!join') {
   }
 
   // Robust participant/JID + display name extraction for groups
-  const jid =
-    msg?.key?.participant ||
-    msg?.participant ||
-    msg?.sender ||
-    msg?.key?.remoteJid; // last-ditch fallback (DMs)
+  const jid = getSenderJid(msg); // normalized person JID
 
   if (!jid) {
     await sock.sendMessage(from, { text: 'Could not detect your JID. Try sending "!join" again.' }, { quoted: msg });
@@ -995,11 +998,11 @@ if (lower === '!join') {
     return;
   }
 
-  // Prefer the message's pushName (works in groups), fallback to bare number
-  const displayName = shortName(msg?.pushName, jid);
+  // Prefer the message's pushName (works in groups), fallback to bare number (changed later)
+  const name = shortName(msg?.pushName, jid);
 
 
-  game.players.push({ jid, name: displayName, hand: [] });
+  game.players.push({ jid, name, hand: [] });
 
   const names = game.players.map(p => `@${p.name}`).join(', ');
   await sock.sendMessage(
@@ -1106,7 +1109,7 @@ if (lower === '!hand') {
     return;
   }
   const jid = getSenderJid(msg);
-  const seatIdx = game.players.findIndex(p => p.jid === jid);
+  const seatIdx = seatIndex(game, jid);   // use the helper we added
   if (seatIdx < 0) {
     await sock.sendMessage(from, { text: 'You are not seated in this game. Use "!join" in lobby.' }, { quoted: msg });
     return;
@@ -1117,7 +1120,7 @@ if (lower === '!hand') {
     await sock.sendMessage(jid, { text: `Your hand:\n${handText}` });
   } catch (e) {
     console.error('[BHABHI !hand DM FAIL]', jid, e?.message || e);
-    await sock.sendMessage(from, { text: `Could not DM you. (Is this a dedicated bot number?)` }, { quoted: msg });
+    await sock.sendMessage(from, { text: `Could not DM you.` }, { quoted: msg });
   }
   return;
 }
@@ -1133,7 +1136,7 @@ if (lower.startsWith('!play')) {
 
   // Extract caller seat
   const jid = getSenderJid(msg);
-  const seatIdx = game.players.findIndex(p => p.jid === jid);
+  const seatIdx = seatIndex(game, jid);
   if (seatIdx < 0) {
     await sock.sendMessage(from, { text: 'You are not seated in this game.' }, { quoted: msg });
     return;
