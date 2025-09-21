@@ -71,6 +71,11 @@ async function refreshGroupAdmins(groupJid) {
   }
 }
 
+function invalidateGroupAdmins(groupJid) {
+  groupAdminsCache.delete(groupJid);
+}
+
+
 async function isGroupAdmin(groupJid, userJid) {
   // Only meaningful in groups (@g.us)
   if (!groupJid.endsWith('@g.us')) return false;
@@ -630,6 +635,19 @@ async function start() {
         await sock.sendMessage(from, { text: '✅ active' }, { quoted: msg });
         return;
       }
+
+      // --- Admin cache refresh (temporary helper) ----------------------------------
+if (lower === '!adminrefresh') {
+  if (from.endsWith('@g.us')) {
+    invalidateGroupAdmins(from);
+    const admins = await refreshGroupAdmins(from); // re-fetch fresh & normalized
+    await sock.sendMessage(from, { text: `Refreshed. Admins now:\n${[...admins].join('\n') || '(none)'}` }, { quoted: msg });
+  } else {
+    await sock.sendMessage(from, { text: 'Group only.' }, { quoted: msg });
+  }
+  return;
+}
+
 
 
       // --- Admin debug (ALWAYS RESPONDS; bypasses start/end & chat mode) ----------
