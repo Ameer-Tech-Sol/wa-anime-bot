@@ -1162,7 +1162,7 @@ if (lower.startsWith('!play')) {
   }
 
   // Parse card from text: allow forms like "7d", "10h", "QH", "q h"
-  const parts = messageText.trim().split(/\s+/);
+  const parts = text.trim().split(/\s+/);
   // !play <card>
   if (parts.length < 2) {
     await sock.sendMessage(from, { text: 'Usage: !play <card>   e.g., !play 7D or !play 10H or !play QS' }, { quoted: msg });
