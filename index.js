@@ -630,6 +630,55 @@ async function start() {
         await sock.sendMessage(from, { text: '✅ active' }, { quoted: msg });
         return;
       }
+
+
+      // --- Admin debug (ALWAYS RESPONDS; bypasses start/end & chat mode) ----------
+if (lower === '!admindebug') {
+  try {
+    const inGroup = from.endsWith('@g.us');
+
+    const callerRaw =
+      msg?.key?.participant ||
+      msg?.participant ||
+      msg?.sender ||
+      (msg?.key?.fromMe ? (sock?.user?.id) : null);
+
+    const callerNorm = normalizeJid(callerRaw);
+
+    if (!inGroup) {
+      await sock.sendMessage(
+        from,
+        { text: `Not a group.\nCaller raw: ${callerRaw}\nCaller norm: ${callerNorm}` },
+        { quoted: msg }
+      );
+      return;
+    }
+
+    const md = await sock.groupMetadata(from);
+    const adminsRaw = (md.participants || [])
+      .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+      .map(p => p.id);
+    const adminsNorm = adminsRaw.map(normalizeJid);
+
+    const ok = await isGroupAdmin(from, callerRaw);
+
+    const report =
+`Group: ${md.subject}
+Admins (raw):
+${adminsRaw.join('\n') || '(none)'}
+Admins (norm):
+${adminsNorm.join('\n') || '(none)'}
+Caller raw: ${callerRaw}
+Caller norm: ${callerNorm}
+isGroupAdmin(from, caller): ${ok}`;
+
+    await sock.sendMessage(from, { text: report }, { quoted: msg });
+  } catch (e) {
+    await sock.sendMessage(from, { text: `admindebug error: ${e?.message || e}` }, { quoted: msg });
+  }
+  return;
+}
+
       
       if (lower === '!end') {
         // Admin-only in groups
