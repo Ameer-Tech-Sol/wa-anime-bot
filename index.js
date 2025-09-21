@@ -1074,14 +1074,30 @@ if (lower === '!bdeal') {
   game.discard = [];
 
   // 4) DM hands (sequential to be gentle on rate limits)
+  // 4) DM hands (sequential, with clear acks + fallback)
   for (const p of game.players) {
+    const targetJid = normalizeJid(p.jid); // extra safety
     const handText = p.hand.join(' ');
     try {
-      await sock.sendMessage(p.jid, { text: `Your Bhabhi hand:\n${handText}\n\n(Play will happen in the group.)` });
+    // DM the player
+      await sock.sendMessage(targetJid, { text: `Your Bhabhi hand:\n${handText}\n\n(Play happens in the group.)` });
+    // Ack in group so we know it was attempted
+      await sock.sendMessage(
+        from,
+        { text: `✅ DM sent to @${p.name}. If you don't see it, send me "!hand".`, mentions: [targetJid] },
+        { quoted: msg }
+      );
     } catch (e) {
-      console.error('[BHABHI DM FAIL]', p.jid, e?.message || e);
+    // Log and provide a visible fallback message
+      console.error('[BHABHI DM FAIL]', targetJid, e?.message || e);
+      await sock.sendMessage(
+        from,
+        { text: `⚠️ Could not DM @${p.name}. Please type "!hand" and I'll DM your cards.`, mentions: [targetJid] },
+        { quoted: msg }
+      );
     }
   }
+
 
   // 5) Announce counts + dealer/leader in group
   const counts = game.players.map((p, i) =>
