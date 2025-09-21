@@ -42,34 +42,26 @@ const gamesByChat = new Map();
 
 
 // === Group admins cache ======================================================
-// Cache admins per group to avoid hitting metadata on every command
 const groupAdminsCache = new Map(); // groupJid -> { at: ms, admins: Set<jid> }
 const ADMINS_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-async function refreshGroupAdmins(groupJid) {
+async function refreshGroupAdmins(sock, groupJid) {
   try {
     const now = Date.now();
     const cached = groupAdminsCache.get(groupJid);
     if (cached && (now - cached.at) < ADMINS_TTL_MS) return cached.admins;
 
-    // Fetch metadata
     const md = await sock.groupMetadata(groupJid);
-    // Baileys participants: { id, admin?: 'admin'|'superadmin'|undefined }
     const admins = new Set(
       (md.participants || [])
         .filter(p => p?.admin || p?.isAdmin || p?.isSuperAdmin)
         .map(p => normalizeJid(p.id))
     );
 
-    // (optional one-time log to verify)
-    console.log('[ADMINS REFRESH]', groupJid, 'admins:', [...admins]);
-
-    const entry = { at: now, admins };
-    groupAdminsCache.set(groupJid, entry);
+    groupAdminsCache.set(groupJid, { at: now, admins });
     return admins;
   } catch (e) {
     console.error('[ADMINS] refresh failed for', groupJid, e?.message || e);
-    // fall back to previous cache if any
     return groupAdminsCache.get(groupJid)?.admins || new Set();
   }
 }
@@ -78,13 +70,12 @@ function invalidateGroupAdmins(groupJid) {
   groupAdminsCache.delete(groupJid);
 }
 
-
-async function isGroupAdmin(groupJid, userJid) {
-  // Only meaningful in groups (@g.us)
+async function isGroupAdmin(sock, groupJid, userJid) {
   if (!groupJid.endsWith('@g.us')) return false;
-  const admins = await refreshGroupAdmins(groupJid);
+  const admins = await refreshGroupAdmins(sock, groupJid);
   return admins.has(normalizeJid(userJid));
 }
+
 
 // Normalize any WhatsApp JID to base form: 92300xxxxxxx@s.whatsapp.net
 function normalizeJid(j) {
@@ -622,7 +613,7 @@ async function start() {
         // Admin-only in groups
         if (from.endsWith('@g.us')) {
           const callerJid = getSenderJid(msg);
-          const ok = await isGroupAdmin(from, callerJid);
+          const ok = await isGroupAdmin(sock, from, callerJid);
           if (!ok) {
             await sock.sendMessage(
               from,
@@ -681,7 +672,7 @@ if (lower === '!admindebug') {
       .map(p => p.id);
     const adminsNorm = adminsRaw.map(normalizeJid);
 
-    const ok = await isGroupAdmin(from, callerRaw);
+    const ok = await isGroupAdmin(sock, from, callerRaw);
 
     const report =
 `Group: ${md.subject}
@@ -705,7 +696,7 @@ isGroupAdmin(from, caller): ${ok}`;
         // Admin-only in groups
         if (from.endsWith('@g.us')) {
           const callerJid = getSenderJid(msg);
-          const ok = await isGroupAdmin(from, callerJid);
+          const ok = await isGroupAdmin(sock, from, callerJid);
           if (!ok) {
             await sock.sendMessage(
               from,
