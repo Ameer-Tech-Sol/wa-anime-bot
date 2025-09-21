@@ -1105,7 +1105,7 @@ if (lower === '!hand') {
     await sock.sendMessage(from, { text: 'No Bhabhi game here.' }, { quoted: msg });
     return;
   }
-  const jid = msg?.key?.participant || msg?.participant || msg?.sender || msg?.key?.remoteJid;
+  const jid = getSenderJid(msg);
   const seatIdx = game.players.findIndex(p => p.jid === jid);
   if (seatIdx < 0) {
     await sock.sendMessage(from, { text: 'You are not seated in this game. Use "!join" in lobby.' }, { quoted: msg });
@@ -1132,7 +1132,7 @@ if (lower.startsWith('!play')) {
   }
 
   // Extract caller seat
-  const jid = msg?.key?.participant || msg?.participant || msg?.sender || msg?.key?.remoteJid;
+  const jid = getSenderJid(msg);
   const seatIdx = game.players.findIndex(p => p.jid === jid);
   if (seatIdx < 0) {
     await sock.sendMessage(from, { text: 'You are not seated in this game.' }, { quoted: msg });
