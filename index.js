@@ -78,10 +78,13 @@ async function isGroupAdmin(sock, groupJid, userJid) {
 
 
 // Normalize any WhatsApp JID to base form: 92300xxxxxxx@s.whatsapp.net
+// Normalize any WhatsApp JID (handles @lid -> messageable JID) via Baileys
 function normalizeJid(j) {
-  if (!j) return null;
-  const base = j.split('@')[0].split(':')[0]; // strip @domain and :device
-  return `${base}@s.whatsapp.net`;
+  try {
+    return j ? jidNormalizedUser(j) : null;
+  } catch {
+    return j || null;
+  }
 }
 
 // Get the sender's *person* JID in a group, normalized.
