@@ -85,6 +85,17 @@ function normalizeJid(j) {
   return `${base}@s.whatsapp.net`;
 }
 
+// Get the sender's *person* JID in a group, normalized.
+// Covers: normal participants, fromMe (your own messages), and other shapes.
+function getSenderJid(msg) {
+  if (msg?.key?.participant) return normalizeJid(msg.key.participant);
+  if (msg?.participant)       return normalizeJid(msg.participant);
+  if (msg?.sender)            return normalizeJid(msg.sender);
+  // If this message is from the bot account itself (fromMe), use the bot JID
+  if (msg?.key?.fromMe)       return normalizeJid(sock?.user?.id);
+  return null; // do NOT fall back to remoteJid (that's the group)
+}
+
 
 
 
@@ -602,11 +613,7 @@ async function start() {
       if (lower === '!start') {
         // Admin-only in groups
         if (from.endsWith('@g.us')) {
-          const callerJid =
-            msg?.key?.participant ||
-            msg?.participant ||
-            msg?.sender ||
-            msg?.key?.remoteJid;
+          const callerJid = getSenderJid(msg);
           const ok = await isGroupAdmin(from, callerJid);
           if (!ok) {
             await sock.sendMessage(
@@ -627,11 +634,7 @@ async function start() {
       if (lower === '!end') {
         // Admin-only in groups
         if (from.endsWith('@g.us')) {
-          const callerJid =
-            msg?.key?.participant ||
-            msg?.participant ||
-            msg?.sender ||
-            msg?.key?.remoteJid;
+          const callerJid = getSenderJid(msg);
           const ok = await isGroupAdmin(from, callerJid);
           if (!ok) {
             await sock.sendMessage(
