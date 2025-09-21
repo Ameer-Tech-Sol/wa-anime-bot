@@ -57,9 +57,12 @@ async function refreshGroupAdmins(groupJid) {
     // Baileys participants: { id, admin?: 'admin'|'superadmin'|undefined }
     const admins = new Set(
       (md.participants || [])
-        .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+        .filter(p => p?.admin || p?.isAdmin || p?.isSuperAdmin)
         .map(p => normalizeJid(p.id))
     );
+
+    // (optional one-time log to verify)
+    console.log('[ADMINS REFRESH]', groupJid, 'admins:', [...admins]);
 
     const entry = { at: now, admins };
     groupAdminsCache.set(groupJid, entry);
