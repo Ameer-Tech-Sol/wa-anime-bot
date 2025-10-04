@@ -413,6 +413,45 @@ function formatTrickLine(game) {
 }
 
 
+// --- Help text ---------------------------------------------------------------
+function getHelpText() {
+  return [
+    '🤖 *Bot Commands*',
+    '',
+    '• !help — show this menu',
+    '• !gid — show this chat JID',
+    '• !chat on | !chat off — toggle chatbot replies (commands always work)',
+    '',
+    '🛡️ *Admin only*',
+    '• !start — activate bot in this chat',
+    '• !end — pause bot in this chat',
+    '',
+    '🎭 *Personas*',
+    '• !list | !char — list characters',
+    '• !switch <name> — switch persona (e.g., !switch hinata)',
+    '',
+    '🧠 *Model*',
+    '• !model set <alias> — groq-8b | deepseek-70b',
+    '',
+    '🖼️ *Actions*',
+    '• .slap @user — anime slap (Tenor)',
+    '• Interactions:',
+    '  .wave .smile .pat .sad .laugh .punch .kill .hungry .naughty .thumbsup .broken',
+    '  .carcrash .fart .kick .fight .morning .midnight',
+    '',
+    '🃏 *Bhabhi (Get Away) game*',
+    '• !bhabhi new — create a lobby',
+    '• !join — join lobby',
+    '• !bdeal — deal & DM hands',
+    '• !hand — DM your current hand',
+    '• !play <card> — play (e.g., !play QS, !play 10H)',
+    '• !bhabhi status — show phase/players',
+    '• !bhabhi end — end the game',
+  ].join('\\n');
+}
+
+
+
 
 
 // --- Tenor helper ------------------------------------------------------------
@@ -590,6 +629,13 @@ async function start() {
         console.log('📌 GROUP ID FOUND: ', from);
         console.log('===================================\n');
       }
+
+    // --- Help / Commands (always available) --------------------------------------
+    if (lower === '!help' || lower === '!commands') {
+      await sock.sendMessage(from, { text: getHelpText() }, { quoted: msg });
+      return;
+    }
+
 
       // --- helper: show this chat's JID (works in groups & DMs)
       if (lower === '!gid') {
