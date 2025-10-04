@@ -447,7 +447,7 @@ function getHelpText() {
     '• !play <card> — play (e.g., !play QS, !play 10H)',
     '• !bhabhi status — show phase/players',
     '• !bhabhi end — end the game',
-  ].join('\\n');
+  ].join('\n');
 }
 
 
