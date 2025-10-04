@@ -185,14 +185,57 @@ function getTextFromMessage(message) {
 
 
 
-function detectMood(text) {
-  const t = text.toLowerCase();
-  if (/happy|haha|lol|😄|😁|😂/.test(t)) return 'happy';
-  if (/sad|😢|😭|☹/.test(t)) return 'sad';
-  if (/angry|mad|😠|😡/.test(t)) return 'angry';
-  if (/blush|cute|☺️|😊|🥰/.test(t)) return 'blush';
-  return null;
+// Classify the *bot's reply* into a mood for stickers.
+// Returns: 'happy' | 'sad' | 'angry' | 'blush' | null
+function detectReplyMood(reply = '') {
+  const t = (reply || '').toLowerCase();
+
+  // quick exits on empty/very short replies
+  if (!t || t.length < 2) return null;
+
+  // token lists (keep small & PG)
+  const POS = /\b(awesome|great|nice|well done|good job|proud of you|gg|bravo|yay|congrats)\b/;
+  const LAUGH = /(haha|hehe|lmao|rofl|lol|😂|🤣|😆)/;
+  const HAPPY_EMOJI = /(😄|😁|🙂|😊|😌|✨|👍|👏|🎉|🥳)/;
+
+  const NEG = /\b(sorry|apologize|can\'t|cannot|sad|unfortunately|regret|loss|miss you|alone)\b/;
+  const SAD_EMOJI = /(😢|😭|☹|🙁|🥺)/;
+
+  const MAD = /\b(angry|mad|furious|annoying|stop it|shut up|enough|pathetic)\b/;
+  const ANGRY_EMOJI = /(😠|😡|💢)/;
+
+  // "blush / cute / shy / flirty / wholesome"
+  const BLUSHY = /\b(cute|adorable|sweet|shy|blush|uwu|baka|senpai|dear|my love)\b/;
+  const BLUSH_EMOJI = /(☺️|😊|🥰|😘|💞|💖)/;
+
+  // scoring
+  let happy = 0, sad = 0, angry = 0, blush = 0;
+
+  if (LAUGH.test(t)) happy += 2;
+  if (POS.test(t)) happy += 2;
+  if (HAPPY_EMOJI.test(t)) happy += 2;
+  if (/[!]{2,}/.test(t)) happy += 1;           // excited tone
+
+  if (NEG.test(t)) sad += 2;
+  if (SAD_EMOJI.test(t)) sad += 2;
+  if (/\.\.\.$/.test(t)) sad += 1;              // trailing ellipsis often "down"
+
+  if (MAD.test(t)) angry += 2;
+  if (ANGRY_EMOJI.test(t)) angry += 2;
+  if (/[!?]{1,}\s*$/m.test(t) && /you\b/.test(t)) angry += 1; // terse jab
+
+  if (BLUSHY.test(t)) blush += 2;
+  if (BLUSH_EMOJI.test(t)) blush += 2;
+  if (/(^|\s)-(?:\s|$)/.test(t)) blush += 1;    // shy pause
+
+  // pick the top mood if it clears a small threshold
+  const scores = { happy, sad, angry, blush };
+  const entries = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  const [topMood, topScore] = entries[0] || [null, 0];
+
+  return topScore >= 2 ? topMood : null;
 }
+
 
 // --- reply post-processing (strip CoT, keep 1–2 sentences) -------------------
 function stripReasoning(s = '') {
@@ -1381,8 +1424,13 @@ if (lower === '!admindebug') {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
 
       // optional mood sticker
-      const mood = detectMood(`${text}\n${replyText}`);
-      const stickerPath = getStickerPath(activeChar, mood);
+      const mood = detectReplyMood(replyText);
+      let finalMood = mood;
+      if (!finalMood) {
+        if (activeChar === 'reina' && /!$/.test(replyText)) finalMood = 'angry';
+        if (activeChar === 'hinata' && /(^|\s)(i|i\'ll|let me)\b/.test(replyText.toLowerCase())) finalMood = 'blush';
+      }
+      const stickerPath = getStickerPath(activeChar, finalMood);
       if (stickerPath) {
         await sock.sendMessage(from, { sticker: fs.readFileSync(stickerPath) }, { quoted: msg });
       }
