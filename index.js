@@ -837,7 +837,7 @@ isGroupAdmin(from, caller): ${ok}`;
           // IMAGE -> sticker
           if (quoted.imageMessage) {
             const media = await downloadMediaMessage(quoted.imageMessage, 'image');
-            await sock.sendMessage(from, { image: media }, { quoted: msg, asSticker: true });
+            await sock.sendMessage(from, { image: media, asSticker: true }, { quoted: msg });
             return;
           }
 
@@ -850,7 +850,7 @@ isGroupAdmin(from, caller): ${ok}`;
               return;
             }
             const media = await downloadMediaMessage(quoted.videoMessage, 'video');
-            await sock.sendMessage(from, { video: media }, { quoted: msg, asSticker: true });
+            await sock.sendMessage(from, { video: media, gifPlayback: true, asSticker: true }, { quoted: msg });
             return;
           }
 
