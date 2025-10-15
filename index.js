@@ -12,7 +12,8 @@ import {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
-  jidNormalizedUser
+  jidNormalizedUser,
+  downloadContentFromMessage
 } from '@whiskeysockets/baileys';
 
 // --- Start/End switch (per chat) ---
