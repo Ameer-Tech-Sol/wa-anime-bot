@@ -525,6 +525,15 @@ async function fetchTenorGifUrl(query) {
   return null;
 }
 
+// Download a WhatsApp media message into a Buffer (image/video) FOR CREATING STICKERS OUT OF IMAGES OR VIDEOS
+async function downloadMediaMessage(msgNode, kind /* 'image' | 'video' */) {
+  const stream = await downloadContentFromMessage(msgNode, kind);
+  let buf = Buffer.from([]);
+  for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
+  return buf;
+}
+
+
 // --- RapidAPI YouTube DL helper ---------------------------------------------
 const YTDL_HOST = process.env.YTDL_API_HOST;
 const YTDL_BASE = (process.env.YTDL_API_BASE_URL || '').replace(/\/+$/, '');
@@ -811,6 +820,53 @@ isGroupAdmin(from, caller): ${ok}`;
         await sock.sendMessage(from, { text: '⏸️ paused' }, { quoted: msg });
         return;
       }
+
+      // --- Sticker maker: reply ".s" to an image or short video --------------------
+      if (lower === '.s') {
+        // We need the quoted/ replied-to message
+        const ctx = msg?.message?.extendedTextMessage?.contextInfo;
+        const quoted = ctx?.quotedMessage;
+
+        if (!quoted) {
+          await sock.sendMessage(from, { text: 'Reply to an *image* or *short video* with .s' }, { quoted: msg });
+          return;
+        }
+
+        try {
+          // IMAGE -> sticker
+          if (quoted.imageMessage) {
+            const media = await downloadMediaMessage(quoted.imageMessage, 'image');
+            await sock.sendMessage(from, { image: media }, { quoted: msg, asSticker: true });
+            return;
+          }
+
+          // VIDEO/GIF -> animated sticker (webp) — keep short, WA prefers ≤ 6s
+          if (quoted.videoMessage) {
+            // guard: very long videos will fail/convert poorly
+            const seconds = Number(quoted.videoMessage?.seconds || 0);
+            if (seconds > 10) {
+              await sock.sendMessage(from, { text: 'Video too long for sticker (max ~10s).' }, { quoted: msg });
+              return;
+            }
+            const media = await downloadMediaMessage(quoted.videoMessage, 'video');
+            await sock.sendMessage(from, { video: media }, { quoted: msg, asSticker: true });
+            return;
+          }
+
+          // TEXT -> we will add in the NEXT STEP
+          if (quoted.conversation || quoted.extendedTextMessage) {
+            await sock.sendMessage(from, { text: 'Text → sticker coming next. For now, reply to an image/video.' }, { quoted: msg });
+            return;
+          }
+
+          await sock.sendMessage(from, { text: 'Unsupported message type. Reply to an *image* or *short video* with .s' }, { quoted: msg });
+        } catch (e) {
+          console.error('[.s] error', e);
+          await sock.sendMessage(from, { text: 'Could not create sticker from that media.' }, { quoted: msg });
+        }
+        return;
+      }
+
 
       // --- chat mode: !chat on / !chat off / !chat (status) ---
       if (lower === '!chat on') {
