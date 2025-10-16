@@ -562,6 +562,67 @@ async function rapidGetJson(pathWithQuery) {
   return res.json();
 }
 
+// --- WebP conversion helpers (require: ffmpeg, cwebp) -----------------------
+import { promises as fsp } from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
+import { promisify } from 'util';
+const pexecFile = promisify(execFile);
+
+async function tmpFile(ext) {
+  const dir = os.tmpdir();
+  const name = `wab_${randomUUID()}${ext}`;
+  return path.join(dir, name);
+}
+
+// Convert a static image buffer -> WebP sticker (max 512px)
+export async function bufferToWebpImage(buf) {
+  const inPath = await tmpFile('.png');   // cwebp accepts png/jpg/etc
+  const outPath = await tmpFile('.webp');
+  try {
+    await fsp.writeFile(inPath, buf);
+    // -resize 512 0 keeps aspect, max width 512
+    await pexecFile('cwebp', ['-q', '80', '-mt', '-resize', '512', '0', inPath, '-o', outPath]);
+    const webp = await fsp.readFile(outPath);
+    return webp;
+  } finally {
+    // best effort cleanup
+    fsp.unlink(inPath).catch(() => {});
+    fsp.unlink(outPath).catch(() => {});
+  }
+}
+
+// Convert short video buffer -> animated WebP sticker (≤10s, 512px, 15fps)
+export async function bufferToWebpVideo(buf, seconds = 10) {
+  const inPath = await tmpFile('.mp4');
+  const outPath = await tmpFile('.webp');
+  try {
+    await fsp.writeFile(inPath, buf);
+    // Produce animated webp with libwebp
+    // Scale to 512px max, 15fps, up to N seconds, no audio/subs
+    await pexecFile('ffmpeg', [
+      '-y',
+      '-i', inPath,
+      '-t', String(Math.min(10, Math.max(1, seconds))),
+      '-vf', 'scale=512:-2:flags=lanczos,fps=15',
+      '-an', '-sn',
+      '-vcodec', 'libwebp',
+      '-preset', 'picture',
+      '-quality', '80',
+      outPath
+    ]);
+    const webp = await fsp.readFile(outPath);
+    return webp;
+  } finally {
+    fsp.unlink(inPath).catch(() => {});
+    fsp.unlink(outPath).catch(() => {});
+  }
+}
+
+
 // Try several common endpoint shapes used by this RapidAPI and hunt for MP4s
 async function getYtMp4Link(videoUrl) {
   const endpoints = [
