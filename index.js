@@ -837,22 +837,40 @@ isGroupAdmin(from, caller): ${ok}`;
           // IMAGE -> sticker
           if (quoted.imageMessage) {
             const media = await downloadMediaMessage(quoted.imageMessage, 'image');
-            await sock.sendMessage(from, { image: media, asSticker: true }, { quoted: msg });
+            await sock.sendMessage(
+              from,
+              { image: media },
+              {
+                quoted: msg,
+                asSticker: true,
+                stickerAuthor: 'WA-Anime-Bot',
+                stickerPack: 'Zerobee'
+              }
+            );
             return;
           }
 
-          // VIDEO/GIF -> animated sticker (webp) — keep short, WA prefers ≤ 6s
+          // VIDEO/GIF -> animated sticker (≤ ~10s)
           if (quoted.videoMessage) {
-            // guard: very long videos will fail/convert poorly
             const seconds = Number(quoted.videoMessage?.seconds || 0);
             if (seconds > 10) {
               await sock.sendMessage(from, { text: 'Video too long for sticker (max ~10s).' }, { quoted: msg });
               return;
             }
             const media = await downloadMediaMessage(quoted.videoMessage, 'video');
-            await sock.sendMessage(from, { video: media, gifPlayback: true, asSticker: true }, { quoted: msg });
-            return;
-          }
+            await sock.sendMessage(
+              from,
+                { video: media, gifPlayback: true },
+                {
+                  quoted: msg,
+                  asSticker: true,
+                  stickerAuthor: 'WA-Anime-Bot',
+                  stickerPack: 'Zerobee'
+                }
+              );
+              return;
+            }
+
 
           // TEXT -> we will add in the NEXT STEP
           if (quoted.conversation || quoted.extendedTextMessage) {
