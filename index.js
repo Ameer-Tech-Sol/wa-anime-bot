@@ -494,6 +494,17 @@ function getHelpText() {
   ].join('\n');
 }
 
+// --- debug: show gates for this chat ----------------------------------------
+if (lower === '!debugchat') {
+  const on   = isActive(from);
+  const talk = isChatOn(from);
+  await sock.sendMessage(
+    from,
+    { text: `active: ${on}\nchat-mode: ${talk}\nallowed: ${((process.env.GROUP_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)).includes(from)}` },
+    { quoted: msg }
+  );
+  return;
+}
 
 
 
