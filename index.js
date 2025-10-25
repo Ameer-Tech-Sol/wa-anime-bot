@@ -109,7 +109,7 @@ const MODEL_REGISTRY = {
   'deepseek-70b': 'deepseek-r1-distill-llama-70b',
 };
 // default active model
-let currentModel = 'deepseek-70b';
+let currentModel = 'groq-8b';
 
 function normalizeModelKey(s) {
   const k = (s || '').toLowerCase().trim();
