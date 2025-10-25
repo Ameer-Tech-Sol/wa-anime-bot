@@ -889,23 +889,15 @@ isGroupAdmin(from, caller): ${ok}`;
         }
 
         try {
-          // IMAGE -> sticker
+          // IMAGE -> explicit WebP sticker (reliable)
           if (quoted.imageMessage) {
             const media = await downloadMediaMessage(quoted.imageMessage, 'image');
-            await sock.sendMessage(
-              from,
-              { image: media },
-              {
-                quoted: msg,
-                asSticker: true,
-                stickerAuthor: 'WA-Anime-Bot',
-                stickerPack: 'Zerobee'
-              }
-            );
+            const webp  = await imageBufferToWebp(media);
+            await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
             return;
           }
 
-          // VIDEO/GIF -> animated sticker (≤ ~10s)
+          // VIDEO/GIF -> explicit animated WebP sticker (reliable)
           if (quoted.videoMessage) {
             const seconds = Number(quoted.videoMessage?.seconds || 0);
             if (seconds > 10) {
@@ -913,18 +905,11 @@ isGroupAdmin(from, caller): ${ok}`;
               return;
             }
             const media = await downloadMediaMessage(quoted.videoMessage, 'video');
-            await sock.sendMessage(
-              from,
-                { video: media, gifPlayback: true },
-                {
-                  quoted: msg,
-                  asSticker: true,
-                  stickerAuthor: 'WA-Anime-Bot',
-                  stickerPack: 'Zerobee'
-                }
-              );
-              return;
-            }
+            const webp  = await videoBufferToWebp(media);
+            await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
+            return;
+          }
+
 
 
           // TEXT -> we will add in the NEXT STEP
