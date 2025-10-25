@@ -7,6 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import qrcode from 'qrcode-terminal';
 import Groq from 'groq-sdk';
+import { execFile } from 'node:child_process';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   default as makeWASocket,
   useMultiFileAuthState,
@@ -494,6 +498,56 @@ function getHelpText() {
   ].join('\n');
 }
 
+//---exec helper---------------------------------------------------------------
+
+function execFileAsync(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr?.toString() || err.message));
+      resolve(stdout);
+    });
+  });
+}
+
+
+// Convert an image buffer (jpg/png/…) to WebP buffer
+async function imageBufferToWebp(buf) {
+  const dir = await mkdtemp(join(tmpdir(), 'wab-'));
+  const src = join(dir, 'src.png');   // cwebp accepts many formats
+  const out = join(dir, 'out.webp');
+  try {
+    await writeFile(src, buf);
+    await execFileAsync('cwebp', ['-q', '90', src, '-o', out]);
+    const webp = await readFile(out);
+    return webp;
+  } finally {
+    try { await rm(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+
+// Convert a short video buffer to animated WebP buffer
+async function videoBufferToWebp(buf) {
+  const dir = await mkdtemp(join(tmpdir(), 'wab-'));
+  const src = join(dir, 'src.mp4');   // ffmpeg will sniff actual codec/container
+  const out = join(dir, 'out.webp');
+  try {
+    await writeFile(src, buf);
+    const args = [
+      '-y', '-i', src,
+      '-vf', 'scale=512:-1:flags=lanczos,fps=12', // sticker-friendly size/fps
+      '-loop', '0',
+      '-an',
+      '-preset', 'picture',
+      out
+    ];
+    await execFileAsync('ffmpeg', args);
+    const webp = await readFile(out);
+    return webp;
+  } finally {
+    try { await rm(dir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 
 
