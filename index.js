@@ -917,8 +917,8 @@ isGroupAdmin(from, caller): ${ok}`;
           // VIDEO/GIF -> explicit animated WebP sticker (reliable)
           if (quoted.videoMessage) {
             const seconds = Number(quoted.videoMessage?.seconds || 0);
-            if (seconds > 10) {
-              await sock.sendMessage(from, { text: 'Video too long for sticker (max ~10s).' }, { quoted: msg });
+            if (seconds > 30) {
+              await sock.sendMessage(from, { text: 'Video too long for sticker (max ~30s).' }, { quoted: msg });
               return;
             }
             const media = await downloadMediaMessage(quoted.videoMessage, 'video');
