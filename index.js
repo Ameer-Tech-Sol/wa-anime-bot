@@ -510,16 +510,28 @@ function execFileAsync(cmd, args) {
 }
 
 
-// Convert an image buffer (jpg/png/…) to WebP buffer
+// Convert an image buffer to a 512x512 WebP sticker WITHOUT stretching.
+// It scales to fit (keeping aspect), then pads with transparent margins.
 async function imageBufferToWebp(buf) {
   const dir = await mkdtemp(join(tmpdir(), 'wab-'));
-  const src = join(dir, 'src.png');   // cwebp accepts many formats
+  const src = join(dir, 'src.png');      // ffmpeg will sniff the real format
   const out = join(dir, 'out.webp');
   try {
     await writeFile(src, buf);
-    await execFileAsync('cwebp', ['-q', '90', src, '-o', out]);
-    const webp = await readFile(out);
-    return webp;
+    const args = [
+      '-y', '-i', src,
+      // keep AR, fit inside 512, then center-pad to exactly 512x512 with alpha
+      '-vf', 'scale=512:512:force_original_aspect_ratio=decrease,' +
+             'pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000',
+      '-frames:v', '1',
+      '-vcodec', 'libwebp',
+      '-lossless', '0',
+      '-compression_level', '6',
+      '-q:v', '80',
+      out
+    ];
+    await execFileAsync('ffmpeg', args);
+    return await readFile(out);
   } finally {
     try { await rm(dir, { recursive: true, force: true }); } catch {}
   }
@@ -527,23 +539,28 @@ async function imageBufferToWebp(buf) {
 
 
 // Convert a short video buffer to animated WebP buffer
+// Convert a short video buffer to animated WebP sticker (512x512, padded).
 async function videoBufferToWebp(buf) {
   const dir = await mkdtemp(join(tmpdir(), 'wab-'));
-  const src = join(dir, 'src.mp4');   // ffmpeg will sniff actual codec/container
+  const src = join(dir, 'src.mp4');
   const out = join(dir, 'out.webp');
   try {
     await writeFile(src, buf);
     const args = [
       '-y', '-i', src,
-      '-vf', 'scale=512:-1:flags=lanczos,fps=12', // sticker-friendly size/fps
+      // fps first, then scale+pad to square with transparency
+      '-vf', 'fps=12,scale=512:512:force_original_aspect_ratio=decrease,' +
+             'pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000',
       '-loop', '0',
       '-an',
-      '-preset', 'picture',
+      '-vcodec', 'libwebp',
+      '-lossless', '0',
+      '-compression_level', '6',
+      '-q:v', '80',
       out
     ];
     await execFileAsync('ffmpeg', args);
-    const webp = await readFile(out);
-    return webp;
+    return await readFile(out);
   } finally {
     try { await rm(dir, { recursive: true, force: true }); } catch {}
   }
