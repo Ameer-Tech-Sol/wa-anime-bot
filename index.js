@@ -1,6 +1,9 @@
 // index.js — WhatsApp bot (Baileys MD, ESM) + Groq multi-character + stickers
 
 import 'dotenv/config';
+import { promises as fsp } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'os';
 import { spawn } from 'child_process';
 import fs from 'fs';
@@ -31,6 +34,12 @@ const chatModeByChat = new Map();
 function setChatMode(chatId, on) { chatModeByChat.set(chatId, on); }
 function isChatOn(chatId) { return chatModeByChat.get(chatId) === true; }
 
+// --- Storage + data helpers ---
+
+const __DIR = dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = join(__DIR, 'data');
+const STATS_PATH  = join(DATA_DIR, 'daily-stats.json');  // per-day message counts
+const MEDALS_PATH = join(DATA_DIR, 'medals.json');       // lifetime medals
 
 // === Games per chat (we support one table per group chat) ====================
 const gamesByChat = new Map();
@@ -186,6 +195,101 @@ function getTextFromMessage(message) {
   const extended = message.extendedTextMessage?.text;
   const imgCap = message.imageMessage?.caption;
   return direct || extended || imgCap || '';
+}
+
+//--- Tiny JSON DB helpers (atomic-ish writes) ------------
+
+async function ensureDataFiles() {
+  await fsp.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
+  // init empty files if missing
+  for (const p of [STATS_PATH, MEDALS_PATH]) {
+    try { await fsp.access(p); }
+    catch { await fsp.writeFile(p, JSON.stringify({}), 'utf8'); }
+  }
+}
+
+async function loadJson(path) {
+  const raw = await fsp.readFile(path, 'utf8').catch(() => '{}');
+  try { return JSON.parse(raw || '{}'); } catch { return {}; }
+}
+
+async function saveJson(path, obj) {
+  const tmp = path + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
+  await fsp.rename(tmp, path);
+}
+
+//--- daily timer skeleton ---
+
+async function runDailyJobs(sock) {
+  try {
+    // We’ll implement: iterate allowed groups -> build report -> send -> update medals
+    // Placeholder log for now:
+    console.log('[daily] tick for', pkDayKey());
+  } catch (e) {
+    console.error('[daily] error', e);
+  } finally {
+    // re-arm to next midnight
+    const ms = Math.max(5_000, nextPkMidnight() - Date.now());
+    setTimeout(() => runDailyJobs(sock), ms);
+  }
+}
+
+// Arm the first run after boot
+function armDailyTimer(sock) {
+  const ms = Math.max(5_000, nextPkMidnight() - Date.now());
+  console.log('[daily] arming in', Math.round(ms/1000), 'sec to', new Date(nextPkMidnight()).toISOString());
+  setTimeout(() => runDailyJobs(sock), ms);
+}
+
+
+// In-memory cache for today's counts (reduces disk churn)
+const todayCache = new Map(); // key: `${group}:${dayKey}` -> { counts:{jid->n}, names:{jid->name} }
+
+function cacheKey(group, day) { return `${group}:${day}`; }
+
+// Increment count for (group, jid) for "today" in PK
+async function bumpCount(groupJid, senderJid, displayName) {
+  const day = pkDayKey();
+  const key = cacheKey(groupJid, day);
+  let bucket = todayCache.get(key);
+  if (!bucket) {
+    bucket = { counts: Object.create(null), names: Object.create(null) };
+    todayCache.set(key, bucket);
+  }
+  bucket.counts[senderJid] = (bucket.counts[senderJid] || 0) + 1;
+  if (displayName) bucket.names[senderJid] = displayName;
+
+  // also persist to file (append-merging)
+  const stats = await loadJson(STATS_PATH);
+  stats[groupJid] ??= {};
+  stats[groupJid][day] ??= { counts: {}, names: {} };
+  const node = stats[groupJid][day];
+  node.counts[senderJid] = (node.counts[senderJid] || 0) + 1;
+  if (displayName) node.names[senderJid] = displayName;
+  await saveJson(STATS_PATH, stats);
+}
+
+
+// ----- Timezone-aware “day key” utilities (midnight→midnight, Pakistan) -----------
+
+const PK_TZ = 'Asia/Karachi';
+
+// Returns 'YYYY-MM-DD' in Pakistan time
+function pkDayKey(ts = Date.now()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: PK_TZ, year:'numeric', month:'2-digit', day:'2-digit' });
+  return fmt.format(ts); // e.g., '2025-09-21'
+}
+
+// Next Pakistan midnight (ms since epoch)
+function nextPkMidnight(ts = Date.now()) {
+  const d = new Date(new Intl.DateTimeFormat('en-CA', {
+    timeZone: PK_TZ, year:'numeric', month:'2-digit', day:'2-digit'
+  }).format(ts) + 'T00:00:00');
+  // d is in local server tz, correct with timezone offset of PK explicitly:
+  const pkNow = new Date(new Date(ts).toLocaleString('en-US', { timeZone: PK_TZ }));
+  const next = new Date(pkNow); next.setHours(24,0,5,0); // 00:00:05 next day in PKT
+  return next.getTime();
 }
 
 
@@ -696,6 +800,7 @@ function pickBestMp4(list) {
 
 // --- main socket -------------------------------------------------------------
 async function start() {
+  await ensureDataFiles();
   if (!process.env.GROQ_API_KEY) {
     console.error('❌ GROQ_API_KEY missing in .env');
     process.exit(1);
@@ -755,6 +860,13 @@ async function start() {
         console.log('===================================\n');
       }
 
+      // Arm daily midnight jobs once per process
+      if (!global.__DAILY_ARMED__) {
+        armDailyTimer(sock);
+        global.__DAILY_ARMED__ = true;
+      }
+
+
     // --- Help / Commands (always available) --------------------------------------
     if (lower === '!help' || lower === '!commands') {
       await sock.sendMessage(from, { text: getHelpText() }, { quoted: msg });
@@ -788,6 +900,39 @@ async function start() {
       if (!allowedGroups.includes(from)) {
         return; // ignore chats outside allowed groups
       }
+
+      // --- Daily message counter (runs for any message in allowed groups) ----------
+      try {
+        // only count group messages that are in your .env allowlist
+        const allowed = (process.env.GROUP_IDS || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean)
+          .includes(from);
+
+        if (allowed && from.endsWith('@g.us')) {
+          const sender =
+            msg?.key?.participant ||
+            msg?.participant ||
+            msg?.sender ||
+            msg?.key?.remoteJid;
+
+          // display name heuristic
+          const name =
+            (typeof m?.pushName === 'string' && m.pushName.trim()) ||
+            (typeof msg?.pushName === 'string' && msg.pushName.trim()) ||
+            (sender?.split('@')[0]) || 'Member';
+
+          if (sender) {
+            bumpCount(from, sender, name).catch(e => console.warn('counter err', e?.message));
+          }
+        }
+      } catch (e) {
+        console.warn('counter outer err', e?.message);
+      }
+
+
+
 
       // --- start/stop controls (work even when paused) ---
       if (lower === '!start') {
