@@ -861,10 +861,9 @@ async function start() {
       }
 
       // Arm daily midnight jobs once per process
-      if (!global.__DAILY_ARMED__) {
-        armDailyTimer(sock);
-        global.__DAILY_ARMED__ = true;
-      }
+      
+      armDailyTimer(sock);
+        
 
 
     // --- Help / Commands (always available) --------------------------------------
