@@ -860,9 +860,9 @@ async function start() {
         console.log('===================================\n');
       }
 
-      // Arm daily midnight jobs once per process
+  // Arm daily midnight jobs once per process
       
-      armDailyTimer(sock);
+  armDailyTimer(sock);
         
 
 
