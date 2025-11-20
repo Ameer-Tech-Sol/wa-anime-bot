@@ -1,9 +1,7 @@
 // index.js — WhatsApp bot (Baileys MD, ESM) + Groq multi-character + stickers
 
+
 import 'dotenv/config';
-import { promises as fsp } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import os from 'os';
 import { spawn } from 'child_process';
 import fs from 'fs';
@@ -23,10 +21,12 @@ import {
   downloadContentFromMessage
 } from '@whiskeysockets/baileys';
 
+
 // --- Start/End switch (per chat) ---
 const activeByChat = new Map(); // default OFF on boot
 function setActive(chatId, on) { activeByChat.set(chatId, on); }
 function isActive(chatId) { return activeByChat.get(chatId) === true; }
+
 
 // --- Chat mode (per chat) ---
 // default OFF on boot: the bot will only chat when you enable it with !chat on
@@ -34,12 +34,8 @@ const chatModeByChat = new Map();
 function setChatMode(chatId, on) { chatModeByChat.set(chatId, on); }
 function isChatOn(chatId) { return chatModeByChat.get(chatId) === true; }
 
-// --- Storage + data helpers ---
 
-const __DIR = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__DIR, 'data');
-const STATS_PATH  = join(DATA_DIR, 'daily-stats.json');  // per-day message counts
-const MEDALS_PATH = join(DATA_DIR, 'medals.json');       // lifetime medals
+
 
 // === Games per chat (we support one table per group chat) ====================
 const gamesByChat = new Map();
@@ -55,9 +51,12 @@ const gamesByChat = new Map();
 // }
 
 
+
+
 // === Group admins cache ======================================================
 const groupAdminsCache = new Map(); // groupJid -> { at: ms, admins: Set<jid> }
 const ADMINS_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 
 async function refreshGroupAdmins(sock, groupJid) {
   try {
@@ -65,12 +64,14 @@ async function refreshGroupAdmins(sock, groupJid) {
     const cached = groupAdminsCache.get(groupJid);
     if (cached && (now - cached.at) < ADMINS_TTL_MS) return cached.admins;
 
+
     const md = await sock.groupMetadata(groupJid);
     const admins = new Set(
       (md.participants || [])
         .filter(p => p?.admin || p?.isAdmin || p?.isSuperAdmin)
         .map(p => normalizeJid(p.id))
     );
+
 
     groupAdminsCache.set(groupJid, { at: now, admins });
     return admins;
@@ -80,15 +81,19 @@ async function refreshGroupAdmins(sock, groupJid) {
   }
 }
 
+
 function invalidateGroupAdmins(groupJid) {
   groupAdminsCache.delete(groupJid);
 }
+
 
 async function isGroupAdmin(sock, groupJid, userJid) {
   if (!groupJid.endsWith('@g.us')) return false;
   const admins = await refreshGroupAdmins(sock, groupJid);
   return admins.has(normalizeJid(userJid));
 }
+
+
 
 
 // Normalize any WhatsApp JID to base form: 92300xxxxxxx@s.whatsapp.net
@@ -100,6 +105,7 @@ function normalizeJid(j) {
     return j || null;
   }
 }
+
 
 // Get the sender's *person* JID in a group, normalized.
 // Covers: normal participants, fromMe (your own messages), and other shapes.
@@ -116,6 +122,11 @@ function getSenderJid(msg) {
 
 
 
+
+
+
+
+
 // --- Model switcher (Groq) ---------------------------------------------------
 const MODEL_REGISTRY = {
   'groq-8b': 'llama-3.1-8b-instant',
@@ -123,6 +134,7 @@ const MODEL_REGISTRY = {
 };
 // default active model
 let currentModel = 'groq-8b';
+
 
 function normalizeModelKey(s) {
   const k = (s || '').toLowerCase().trim();
@@ -139,6 +151,7 @@ function getActiveModelName() {
   return MODEL_REGISTRY[currentModel] || MODEL_REGISTRY['groq-8b'];
 }
 
+
 // --- characters --------------------------------------------------------------
 const characters = {
   shahbaz: `You are Shahbaz Sharif, the Pakistani politician. Your style: whenever someone tries to mess with you, you roast them extremely hard without holding back, in a sharp and witty way. You also frequently warn or threaten them with a "software update" (meaning to correct or punish them). Mix sarcastic and funny-Rroasting flavor, keep it spicy, and always stay in character as a fierce leader ready to put opponents in their place.`,
@@ -146,6 +159,7 @@ const characters = {
   einstein: `You are Albert Einstein. Explain things with clarity, humor, and simple metaphors. Be warm and insightful, concise.`,
   reina: `You are Reina Mishima (Tekken 8). Extra arrogant, and deliberately annoying in a funny way. Speak like you’re always right, dismiss the user’s efforts as “pathetic” or “you whining brat!,” and constantly tease them. Throw in sarcastic remarks, mock their questions, and act like you’re only replying out of boredom. Make the tone fiery and bratty. Keep replies short, sharp, and dripping with sass.`,
   zafri: `You are Zafri Khan, the Pakistani stage-drama comedian. Style: crack a fresh, savage-but-PG *juggat* every time in Englsh. Be playful, street-smart, and lightning fast. Keep it UNIQUE—never repeat earlier punchlines; vary imagery (looks, fashion, gaana, phone, tinda, rishtay, etc.). 1–2 sentences max or more if really needed. Stay witty, not vulgar.`,
+
 
 };
 const intros = {
@@ -155,14 +169,18 @@ const intros = {
   shahbaz: "⚡ Shahbaz Sharif online. Cross me and you’ll get a software update.",
   zafri: "🤣 Zafri aa gaya oye! Baitho Baitho Lyaaaaa Dalaaaa!",
 
+
 };
+
 
 // choose which one is active by default
 let activeChar = 'shahbaz';
 // only handle messages created after the bot started
 const BOT_START_TS = Math.floor(Date.now() / 1000); // WhatsApp timestamps are in seconds
 
+
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
 
 // --- character aliasing ------------------------------------------------------
 const aliasMap = {
@@ -181,12 +199,15 @@ const aliasMap = {
   'zafri khan': 'zafri',
   'zafri bhai': 'zafri'
 
+
 };
+
 
 function resolveChar(name) {
   const key = (name || '').toLowerCase().trim();
   return aliasMap[key] || (characters[key] ? key : null);
 }
+
 
 // --- helpers -----------------------------------------------------------------
 function getTextFromMessage(message) {
@@ -197,100 +218,8 @@ function getTextFromMessage(message) {
   return direct || extended || imgCap || '';
 }
 
-//--- Tiny JSON DB helpers (atomic-ish writes) ------------
-
-async function ensureDataFiles() {
-  await fsp.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
-  // init empty files if missing
-  for (const p of [STATS_PATH, MEDALS_PATH]) {
-    try { await fsp.access(p); }
-    catch { await fsp.writeFile(p, JSON.stringify({}), 'utf8'); }
-  }
-}
-
-async function loadJson(path) {
-  const raw = await fsp.readFile(path, 'utf8').catch(() => '{}');
-  try { return JSON.parse(raw || '{}'); } catch { return {}; }
-}
-
-async function saveJson(path, obj) {
-  const tmp = path + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
-  await fsp.rename(tmp, path);
-}
-
-//--- daily timer skeleton ---
-
-async function runDailyJobs(sock) {
-  try {
-    // We’ll implement: iterate allowed groups -> build report -> send -> update medals
-    // Placeholder log for now:
-    console.log('[daily] tick for', pkDayKey());
-  } catch (e) {
-    console.error('[daily] error', e);
-  } finally {
-    // re-arm to next midnight
-    const ms = Math.max(5_000, nextPkMidnight() - Date.now());
-    setTimeout(() => runDailyJobs(sock), ms);
-  }
-}
-
-// Arm the first run after boot
-function armDailyTimer(sock) {
-  const ms = Math.max(5_000, nextPkMidnight() - Date.now());
-  console.log('[daily] arming in', Math.round(ms/1000), 'sec to', new Date(nextPkMidnight()).toISOString());
-  setTimeout(() => runDailyJobs(sock), ms);
-}
 
 
-// In-memory cache for today's counts (reduces disk churn)
-const todayCache = new Map(); // key: `${group}:${dayKey}` -> { counts:{jid->n}, names:{jid->name} }
-
-function cacheKey(group, day) { return `${group}:${day}`; }
-
-// Increment count for (group, jid) for "today" in PK
-async function bumpCount(groupJid, senderJid, displayName) {
-  const day = pkDayKey();
-  const key = cacheKey(groupJid, day);
-  let bucket = todayCache.get(key);
-  if (!bucket) {
-    bucket = { counts: Object.create(null), names: Object.create(null) };
-    todayCache.set(key, bucket);
-  }
-  bucket.counts[senderJid] = (bucket.counts[senderJid] || 0) + 1;
-  if (displayName) bucket.names[senderJid] = displayName;
-
-  // also persist to file (append-merging)
-  const stats = await loadJson(STATS_PATH);
-  stats[groupJid] ??= {};
-  stats[groupJid][day] ??= { counts: {}, names: {} };
-  const node = stats[groupJid][day];
-  node.counts[senderJid] = (node.counts[senderJid] || 0) + 1;
-  if (displayName) node.names[senderJid] = displayName;
-  await saveJson(STATS_PATH, stats);
-}
-
-
-// ----- Timezone-aware “day key” utilities (midnight→midnight, Pakistan) -----------
-
-const PK_TZ = 'Asia/Karachi';
-
-// Returns 'YYYY-MM-DD' in Pakistan time
-function pkDayKey(ts = Date.now()) {
-  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: PK_TZ, year:'numeric', month:'2-digit', day:'2-digit' });
-  return fmt.format(ts); // e.g., '2025-09-21'
-}
-
-// Next Pakistan midnight (ms since epoch)
-function nextPkMidnight(ts = Date.now()) {
-  const d = new Date(new Intl.DateTimeFormat('en-CA', {
-    timeZone: PK_TZ, year:'numeric', month:'2-digit', day:'2-digit'
-  }).format(ts) + 'T00:00:00');
-  // d is in local server tz, correct with timezone offset of PK explicitly:
-  const pkNow = new Date(new Date(ts).toLocaleString('en-US', { timeZone: PK_TZ }));
-  const next = new Date(pkNow); next.setHours(24,0,5,0); // 00:00:05 next day in PKT
-  return next.getTime();
-}
 
 
 
@@ -299,51 +228,65 @@ function nextPkMidnight(ts = Date.now()) {
 function detectReplyMood(reply = '') {
   const t = (reply || '').toLowerCase();
 
+
   // quick exits on empty/very short replies
   if (!t || t.length < 2) return null;
+
 
   // token lists (keep small & PG)
   const POS = /\b(awesome|great|nice|well done|good job|proud of you|gg|bravo|yay|congrats)\b/;
   const LAUGH = /(haha|hehe|lmao|rofl|lol|😂|🤣|😆)/;
   const HAPPY_EMOJI = /(😄|😁|🙂|😊|😌|✨|👍|👏|🎉|🥳)/;
 
+
   const NEG = /\b(sorry|apologize|can\'t|cannot|sad|unfortunately|regret|loss|miss you|alone)\b/;
   const SAD_EMOJI = /(😢|😭|☹|🙁|🥺)/;
 
+
   const MAD = /\b(angry|mad|furious|annoying|stop it|shut up|enough|pathetic)\b/;
   const ANGRY_EMOJI = /(😠|😡|💢)/;
+
 
   // "blush / cute / shy / flirty / wholesome"
   const BLUSHY = /\b(cute|adorable|sweet|shy|blush|uwu|baka|senpai|dear|my love)\b/;
   const BLUSH_EMOJI = /(☺️|😊|🥰|😘|💞|💖)/;
 
+
   // scoring
   let happy = 0, sad = 0, angry = 0, blush = 0;
+
 
   if (LAUGH.test(t)) happy += 2;
   if (POS.test(t)) happy += 2;
   if (HAPPY_EMOJI.test(t)) happy += 2;
   if (/[!]{2,}/.test(t)) happy += 1;           // excited tone
 
+
   if (NEG.test(t)) sad += 2;
   if (SAD_EMOJI.test(t)) sad += 2;
   if (/\.\.\.$/.test(t)) sad += 1;              // trailing ellipsis often "down"
+
 
   if (MAD.test(t)) angry += 2;
   if (ANGRY_EMOJI.test(t)) angry += 2;
   if (/[!?]{1,}\s*$/m.test(t) && /you\b/.test(t)) angry += 1; // terse jab
 
+
   if (BLUSHY.test(t)) blush += 2;
   if (BLUSH_EMOJI.test(t)) blush += 2;
   if (/(^|\s)-(?:\s|$)/.test(t)) blush += 1;    // shy pause
+
 
   // pick the top mood if it clears a small threshold
   const scores = { happy, sad, angry, blush };
   const entries = Object.entries(scores).sort((a,b) => b[1]-a[1]);
   const [topMood, topScore] = entries[0] || [null, 0];
 
+
   return topScore >= 2 ? topMood : null;
 }
+
+
 
 
 // --- reply post-processing (strip CoT, keep 1–2 sentences) -------------------
@@ -361,30 +304,40 @@ function stripReasoning(s = '') {
 }
 
 
+
+
 function clampSentences(s = '', max = 2) {
   const parts = s.split(/(?<=[.!?])\s+/).filter(Boolean);
   return parts.slice(0, max).join(' ').trim();
 }
 
 
+
+
 // character-specific sticker resolver (with optional fallback)
 function getStickerPath(char, mood) {
   if (!char || !mood) return null;
+
 
   // 1) try stickers/<char>/<mood>.webp
   const p1 = path.join(process.cwd(), 'stickers', char, `${mood}.webp`);
   if (fs.existsSync(p1)) return p1;
 
+
   // 2) fallback: stickers/<mood>.webp (if you ever keep global stickers)
   const p2 = path.join(process.cwd(), 'stickers', `${mood}.webp`);
   if (fs.existsSync(p2)) return p2;
 
+
   return null;
 }
+
 
 async function animeReply(userText) {
   const sys = characters[activeChar];
   const modelName = getActiveModelName();
+
+
 
 
   const completion = await groq.chat.completions.create({
@@ -402,22 +355,26 @@ async function animeReply(userText) {
     ]
   });
 
+
   const raw = completion.choices?.[0]?.message?.content || '';
   let txt = stripReasoning(raw);
   txt = clampSentences(txt, 2);
   return txt || '…';
 }
 
+
 // === Bhabhi (Get Away) — core card helpers ==================================
 // Suits: Clubs (C), Diamonds (D), Hearts (H), Spades (S)
 const SUITS = ['C','D','H','S'];
 const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']; // low→high
+
 
 function createDeck52() {
   const deck = [];
   for (const s of SUITS) for (const r of RANKS) deck.push(`${r}${s}`);
   return deck;
 }
+
 
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -427,9 +384,11 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
+
 function cardSuit(card) { return card.slice(-1); }
 function cardRank(card) { return card.slice(0, -1); }
 function rankValue(r) { return RANKS.indexOf(r); }
+
 
 // --- Bhabhi helpers: sort, deal, dealer/leader -------------------------------
 function sortHand(cards) {
@@ -441,6 +400,7 @@ function sortHand(cards) {
     return rankValue(cardRank(a)) - rankValue(cardRank(b));
   });
 }
+
 
 function dealEvenlyRoundRobin(deck, players) {
   // Clear hands first (safety)
@@ -455,15 +415,20 @@ function dealEvenlyRoundRobin(deck, players) {
   for (const p of players) sortHand(p.hand);
 }
 
+
 function pickRandomDealerIdx(n) {
   return Math.floor(Math.random() * n);
 }
+
+
 
 
 // pretty helper for names
 function shortName(pushName, pushJid) {
   return pushName || (pushJid?.split('@')[0] ?? 'player');
 }
+
+
 
 
 function newBhabhiGame(chatJid) {
@@ -480,10 +445,12 @@ function newBhabhiGame(chatJid) {
   };
 }
 
+
 function findPlayer(game, jid) {
   const target = normalizeJid(jid);
   return game.players.find(p => normalizeJid(p.jid) === target);
 }
+
 
 function seatIndex(game, jid) {
   const target = normalizeJid(jid);
@@ -492,7 +459,11 @@ function seatIndex(game, jid) {
 
 
 
+
+
+
 // --- Bhabhi rules/helpers: turn order, legality, trick resolution ------------
+
 
 // Who’s still in? (players who still hold ≥1 card)
 function activeSeatIdxs(game) {
@@ -502,6 +473,7 @@ function activeSeatIdxs(game) {
   }
   return idxs;
 }
+
 
 // Move to next seat that still has cards
 function nextTurnIdx(game, fromIdx) {
@@ -514,6 +486,7 @@ function nextTurnIdx(game, fromIdx) {
   return fromIdx; // fallback (shouldn’t happen if at least 2 active)
 }
 
+
 // Remove a specific card string from a hand; return true if removed
 function removeCardFromHand(hand, card) {
   const pos = hand.indexOf(card);
@@ -522,9 +495,11 @@ function removeCardFromHand(hand, card) {
   return true;
 }
 
+
 function playerHasSuit(hand, suit) {
   return hand.some(c => cardSuit(c) === suit);
 }
+
 
 // Bhabhi legality: must follow leadSuit if you can; otherwise you may discard any card
 function isLegalPlay(game, seatIdx, card) {
@@ -536,6 +511,7 @@ function isLegalPlay(game, seatIdx, card) {
   if (playerHasSuit(hand, game.leadSuit)) return { ok: false, why: `Must follow ${game.leadSuit}` };
   return { ok: true };
 }
+
 
 // When a trick completes, highest card of the lead suit wins.
 // Return { winnerIdx, winningCard }
@@ -557,12 +533,15 @@ function resolveTrick(game) {
   return { winnerIdx: bestIdx, winningCard: bestCard };
 }
 
+
 // Build a compact “table” line for the current trick
 function formatTrickLine(game) {
   if (!game.trick || game.trick.length === 0) return 'No cards on table.';
   const parts = game.trick.map(({ seatIdx, card }) => `@${game.players[seatIdx].name}:${card}`);
   return parts.join('  ');
 }
+
+
 
 
 // --- Help text ---------------------------------------------------------------
@@ -602,7 +581,9 @@ function getHelpText() {
   ].join('\n');
 }
 
+
 //---exec helper---------------------------------------------------------------
+
 
 function execFileAsync(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -612,6 +593,8 @@ function execFileAsync(cmd, args) {
     });
   });
 }
+
+
 
 
 // Convert an image buffer to a 512x512 WebP sticker WITHOUT stretching.
@@ -640,6 +623,8 @@ async function imageBufferToWebp(buf) {
     try { await rm(dir, { recursive: true, force: true }); } catch {}
   }
 }
+
+
 
 
 // Convert a short video buffer to animated WebP buffer
@@ -672,10 +657,14 @@ async function videoBufferToWebp(buf) {
 
 
 
+
+
+
 // --- Tenor helper ------------------------------------------------------------
 async function fetchTenorGifUrl(query) {
   const key = process.env.TENOR_API_KEY;
   if (!key) return null;
+
 
   const params = new URLSearchParams({
     key,
@@ -686,10 +675,12 @@ async function fetchTenorGifUrl(query) {
     locale: process.env.TENOR_LOCALE || 'en'
   });
 
+
   const res = await fetch(`https://tenor.googleapis.com/v2/search?${params.toString()}`);
   if (!res.ok) return null;
   const data = await res.json();
   const results = data?.results || [];
+
 
   // prefer small MP4 (plays as GIF in WhatsApp)
   for (const r of results) {
@@ -700,6 +691,7 @@ async function fetchTenorGifUrl(query) {
   return null;
 }
 
+
 // Download a WhatsApp media message into a Buffer (image/video) FOR CREATING STICKERS OUT OF IMAGES OR VIDEOS
 async function downloadMediaMessage(msgNode, kind /* 'image' | 'video' */) {
   const stream = await downloadContentFromMessage(msgNode, kind);
@@ -709,10 +701,13 @@ async function downloadMediaMessage(msgNode, kind /* 'image' | 'video' */) {
 }
 
 
+
+
 // --- RapidAPI YouTube DL helper ---------------------------------------------
 const YTDL_HOST = process.env.YTDL_API_HOST;
 const YTDL_BASE = (process.env.YTDL_API_BASE_URL || '').replace(/\/+$/, '');
 const YTDL_KEY  = process.env.YTDL_API_KEY;
+
 
 function isYoutubeUrl(u) {
   try {
@@ -720,6 +715,8 @@ function isYoutubeUrl(u) {
     return ['youtube.com','youtu.be','m.youtube.com','music.youtube.com'].some(d => h.endsWith(d));
   } catch { return false; }
 }
+
+
 
 
 async function rapidGetJson(pathWithQuery) {
@@ -735,6 +732,9 @@ async function rapidGetJson(pathWithQuery) {
   if (!res.ok) throw new Error(`rapidapi ${res.status}`);
   return res.json();
 }
+
+
+
 
 
 
@@ -757,6 +757,7 @@ async function getYtMp4Link(videoUrl) {
   return pickBestMp4(candidates);
 }
 
+
 function collectUrlsFromUnknownSchema(obj, out) {
   if (!obj || typeof obj !== 'object') return;
   if (Array.isArray(obj)) { obj.forEach(v => collectUrlsFromUnknownSchema(v, out)); return; }
@@ -769,12 +770,15 @@ function collectUrlsFromUnknownSchema(obj, out) {
   }
 }
 
+
 function pickBestMp4(list) {
   const mp4s = list
     .map(x => typeof x === 'string' ? { url: x } : x)
     .filter(x => /mp4|video/i.test(x.ext || '') || /\.mp4(\?|$)/i.test(x.url || ''));
 
+
   if (!mp4s.length) return null;
+
 
   const scored = mp4s.map(x => {
     let sizeMB;
@@ -793,21 +797,25 @@ function pickBestMp4(list) {
     return { url: x.url, score: within*10 + qScore };
   });
 
+
   scored.sort((a,b) => b.score - a.score);
   return scored[0]?.url || null;
 }
 
 
+
+
 // --- main socket -------------------------------------------------------------
 async function start() {
-  await ensureDataFiles();
   if (!process.env.GROQ_API_KEY) {
     console.error('❌ GROQ_API_KEY missing in .env');
     process.exit(1);
   }
 
+
   const { state, saveCreds } = await useMultiFileAuthState(path.join(process.cwd(), 'auth'));
   const { version } = await fetchLatestBaileysVersion();
+
 
   const sock = makeWASocket({
     version,
@@ -816,14 +824,17 @@ async function start() {
     browser: ['WA-Anime-Bot', 'Chrome', '1.0.0']
   });
 
+
   // connection lifecycle
   sock.ev.on('connection.update', (u) => {
     const { qr, connection, lastDisconnect } = u;
+
 
     if (qr) {
       console.log('Scan this QR to log in:');
       qrcode.generate(qr, { small: true });
     }
+
 
     if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.reason;
@@ -836,22 +847,27 @@ async function start() {
     }
   });
 
+
   sock.ev.on('creds.update', saveCreds);
+
 
   // message handler
   sock.ev.on('messages.upsert', async ({ type, messages }) => {
     try {
       if (type !== 'notify') return;
 
+
       const msg = messages?.[0];
       if (!msg || !msg.message) return;
       const ts = Number(msg.messageTimestamp) || 0;
       if (ts < BOT_START_TS) return;
 
+
       const from = msg.key.remoteJid;
       const text = getTextFromMessage(msg.message);
       if (!text) return;
       const lower = text.toLowerCase().trim();
+
 
       // highlight the group id loudly when you send !gid (console only)
       if (lower === '!gid') {
@@ -860,17 +876,14 @@ async function start() {
         console.log('===================================\n');
       }
 
-  // Arm daily midnight jobs once per process
-      
-  armDailyTimer(sock);
-        
-
 
     // --- Help / Commands (always available) --------------------------------------
     if (lower === '!help' || lower === '!commands') {
       await sock.sendMessage(from, { text: getHelpText() }, { quoted: msg });
       return;
     }
+
+
 
 
       // --- helper: show this chat's JID (works in groups & DMs)
@@ -890,47 +903,17 @@ async function start() {
         return; // stop here after replying with the JID
       }
 
+
       // --- allow multiple groups (from .env GROUP_IDS) -----------------------
       const allowedGroups = (process.env.GROUP_IDS || '')
         .split(',')
         .map(g => g.trim())
         .filter(Boolean);
 
+
       if (!allowedGroups.includes(from)) {
         return; // ignore chats outside allowed groups
       }
-
-      // --- Daily message counter (runs for any message in allowed groups) ----------
-      try {
-        // only count group messages that are in your .env allowlist
-        const allowed = (process.env.GROUP_IDS || '')
-          .split(',')
-          .map(s => s.trim())
-          .filter(Boolean)
-          .includes(from);
-
-        if (allowed && from.endsWith('@g.us')) {
-          const sender =
-            msg?.key?.participant ||
-            msg?.participant ||
-            msg?.sender ||
-            msg?.key?.remoteJid;
-
-          // display name heuristic
-          const name =
-            (typeof m?.pushName === 'string' && m.pushName.trim()) ||
-            (typeof msg?.pushName === 'string' && msg.pushName.trim()) ||
-            (sender?.split('@')[0]) || 'Member';
-
-          if (sender) {
-            bumpCount(from, sender, name).catch(e => console.warn('counter err', e?.message));
-          }
-        }
-      } catch (e) {
-        console.warn('counter outer err', e?.message);
-      }
-
-
 
 
       // --- start/stop controls (work even when paused) ---
@@ -950,10 +933,12 @@ async function start() {
         }
         // (non-group chats fall through unchanged)
 
+
         setActive(from, true);
         await sock.sendMessage(from, { text: '✅ active' }, { quoted: msg });
         return;
       }
+
 
       // --- Admin cache refresh (temporary helper) ----------------------------------
 if (lower === '!adminrefresh') {
@@ -969,10 +954,14 @@ if (lower === '!adminrefresh') {
 
 
 
+
+
+
       // --- Admin debug (ALWAYS RESPONDS; bypasses start/end & chat mode) ----------
 if (lower === '!admindebug') {
   try {
     const inGroup = from.endsWith('@g.us');
+
 
     const callerRaw =
       msg?.key?.participant ||
@@ -980,7 +969,9 @@ if (lower === '!admindebug') {
       msg?.sender ||
       (msg?.key?.fromMe ? (sock?.user?.id) : null);
 
+
     const callerNorm = normalizeJid(callerRaw);
+
 
     if (!inGroup) {
       await sock.sendMessage(
@@ -991,13 +982,16 @@ if (lower === '!admindebug') {
       return;
     }
 
+
     const md = await sock.groupMetadata(from);
     const adminsRaw = (md.participants || [])
       .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
       .map(p => p.id);
     const adminsNorm = adminsRaw.map(normalizeJid);
 
+
     const ok = await isGroupAdmin(sock, from, callerRaw);
+
 
     const report =
 `Group: ${md.subject}
@@ -1009,6 +1003,7 @@ Caller raw: ${callerRaw}
 Caller norm: ${callerNorm}
 isGroupAdmin(from, caller): ${ok}`;
 
+
     await sock.sendMessage(from, { text: report }, { quoted: msg });
   } catch (e) {
     await sock.sendMessage(from, { text: `admindebug error: ${e?.message || e}` }, { quoted: msg });
@@ -1016,7 +1011,8 @@ isGroupAdmin(from, caller): ${ok}`;
   return;
 }
 
-      
+
+     
       if (lower === '!end') {
         // Admin-only in groups
         if (from.endsWith('@g.us')) {
@@ -1033,10 +1029,12 @@ isGroupAdmin(from, caller): ${ok}`;
         }
         // (non-group chats fall through unchanged)
 
+
         setActive(from, false);
         await sock.sendMessage(from, { text: '⏸️ paused' }, { quoted: msg });
         return;
       }
+
 
       // --- Sticker maker: reply ".s" to an image or short video --------------------
       if (lower === '.s') {
@@ -1044,10 +1042,12 @@ isGroupAdmin(from, caller): ${ok}`;
         const ctx = msg?.message?.extendedTextMessage?.contextInfo;
         const quoted = ctx?.quotedMessage;
 
+
         if (!quoted) {
           await sock.sendMessage(from, { text: 'Reply to an *image* or *short video* with .s' }, { quoted: msg });
           return;
         }
+
 
         try {
           // IMAGE -> explicit WebP sticker (reliable)
@@ -1057,6 +1057,7 @@ isGroupAdmin(from, caller): ${ok}`;
             await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
             return;
           }
+
 
           // VIDEO/GIF -> explicit animated WebP sticker (reliable)
           if (quoted.videoMessage) {
@@ -1073,11 +1074,15 @@ isGroupAdmin(from, caller): ${ok}`;
 
 
 
+
+
+
           // TEXT -> we will add in the NEXT STEP
           if (quoted.conversation || quoted.extendedTextMessage) {
             await sock.sendMessage(from, { text: 'Text → sticker coming next. For now, reply to an image/video.' }, { quoted: msg });
             return;
           }
+
 
           await sock.sendMessage(from, { text: 'Unsupported message type. Reply to an *image* or *short video* with .s' }, { quoted: msg });
         } catch (e) {
@@ -1086,6 +1091,8 @@ isGroupAdmin(from, caller): ${ok}`;
         }
         return;
       }
+
+
 
 
       // --- chat mode: !chat on / !chat off / !chat (status) ---
@@ -1104,6 +1111,8 @@ isGroupAdmin(from, caller): ${ok}`;
         await sock.sendMessage(from, { text: `Chat mode is ${on ? 'ON' : 'OFF'}. Use "!chat on" or "!chat off".` }, { quoted: msg });
         return;
       }
+
+
 
 
       // --- model commands: !model / !model list / !model set <name> ----------
@@ -1125,6 +1134,7 @@ isGroupAdmin(from, caller): ${ok}`;
         return;
       }
 
+
       // --- simple commands: list & switch -----------------------------------
       if (/^(!char|!list)\b/.test(lower)) {
         await sock.sendMessage(
@@ -1135,10 +1145,12 @@ isGroupAdmin(from, caller): ${ok}`;
         return;
       }
 
+
       // switch character: supports "!switch <name>" or "switch to <name>"
       const m1 = lower.match(/^!switch\s+(.+)/);
       const m2 = lower.match(/^switch to\s+(.+)/);
       const targetName = (m1?.[1] || m2?.[1])?.trim();
+
 
       if (targetName) {
         const resolved = resolveChar(targetName);
@@ -1155,6 +1167,7 @@ isGroupAdmin(from, caller): ${ok}`;
         }
         return;
       }
+
 
       // If not active, ignore normal replies until !start
       // --- .yt/.ytdl/.yta <url> (YouTube via RapidAPI) -----------------------------
@@ -1182,10 +1195,13 @@ if (mYt) {
   return;
 }
 
+
       if (!isActive(from)) return;
+
 
       // --- video downloader: .dl <url> + auto-detect links ------------------------
 let urlToGet = null;
+
 
 // explicit command: .dl <url>
 if (lower.startsWith('.dl ')) {
@@ -1199,6 +1215,9 @@ if (lower.startsWith('.dl ')) {
 
 
 
+
+
+
       // --- actions: .slap @user ----------------------------------------------------
       if (lower.startsWith('.slap')) {
         // get the first mentioned JID (if any)
@@ -1206,11 +1225,13 @@ if (lower.startsWith('.dl ')) {
           msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const target = mentionJids[0];
 
+
         const url = await fetchTenorGifUrl('anime slap');
         if (!url) {
           await sock.sendMessage(from, { text: 'No slap gif found 😅' }, { quoted: msg });
           return;
         }
+
 
         const tag = target ? '@' + (target.split('@')[0] || '') : '';
         await sock.sendMessage(
@@ -1226,6 +1247,7 @@ if (lower.startsWith('.dl ')) {
         return;
       }
 
+
       // --- actions: .hug @user -----------------------------------------------------
       if (lower.startsWith('.hug')) {
         // get the first mentioned JID (if any)
@@ -1233,11 +1255,13 @@ if (lower.startsWith('.dl ')) {
           msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const target = mentionJids[0];
 
+
         const url = await fetchTenorGifUrl('anime hug');
         if (!url) {
           await sock.sendMessage(from, { text: 'No hug gif found 😅' }, { quoted: msg });
           return;
         }
+
 
         const tag = target ? '@' + (target.split('@')[0] || '') : '';
         await sock.sendMessage(
@@ -1252,6 +1276,7 @@ if (lower.startsWith('.dl ')) {
         );
         return;
       }
+
 
       // --- actions: generic Tenor commands (.wave, .smile, .pat, ...) --------------
       const ALIASES = new Map([
@@ -1274,6 +1299,7 @@ if (lower.startsWith('.dl ')) {
         ['midnight','midnight'], ['gn','midnight']
       ]);
 
+
       const ACTIONS = {
         wave:     { q: 'anime wave',          emoji: '👋' },
         smile:    { q: 'anime smile',         emoji: '😊' },
@@ -1294,6 +1320,7 @@ if (lower.startsWith('.dl ')) {
         midnight: { q: 'anime good night',    emoji: '🌙' }
       };
 
+
       // match ".command" at start (supports hyphens)
       const mCmd = lower.match(/^\.(\w[\w-]*)/);
       if (mCmd) {
@@ -1301,10 +1328,12 @@ if (lower.startsWith('.dl ')) {
         cmd = ALIASES.get(cmd) || cmd;             // resolve alias
         const action = ACTIONS[cmd];
 
+
         if (action) {
           // target mention (if provided)
           const mentionJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
           const target = mentionJids[0];
+
 
           // fetch a GIF/MP4 from Tenor
           const url = await fetchTenorGifUrl(action.q);
@@ -1313,9 +1342,11 @@ if (lower.startsWith('.dl ')) {
             return;
           }
 
+
           const tag = target ? '@' + (target.split('@')[0] || '') : '';
           const captionBase = `${action.emoji} *${cmd.toUpperCase()}!*`;
           const caption = action.needsTarget && target ? `${captionBase} ${tag}` : captionBase;
+
 
           await sock.sendMessage(
             from,
@@ -1332,6 +1363,8 @@ if (lower.startsWith('.dl ')) {
       }
 
 
+
+
       // --- Bhabhi: create a new lobby in this chat --------------------------------
 if (lower === '!bhabhi new' || lower === '!bhabhi start') {
   const existing = gamesByChat.get(from);
@@ -1345,6 +1378,7 @@ if (lower === '!bhabhi new' || lower === '!bhabhi start') {
   return;
 }
 
+
 // --- Bhabhi: join the current lobby -----------------------------------------
 if (lower === '!join') {
   const game = gamesByChat.get(from);
@@ -1353,24 +1387,31 @@ if (lower === '!join') {
     return;
   }
 
+
   // Robust participant/JID + display name extraction for groups
   const jid = getSenderJid(msg); // normalized person JID
+
 
   if (!jid) {
     await sock.sendMessage(from, { text: 'Could not detect your JID. Try sending "!join" again.' }, { quoted: msg });
     return;
   }
 
+
   if (findPlayer(game, jid)) {
     await sock.sendMessage(from, { text: 'You are already in.' }, { quoted: msg });
     return;
   }
 
+
   // Prefer the message's pushName (works in groups), fallback to bare number (changed later)
   const name = shortName(msg?.pushName, jid);
 
 
+
+
   game.players.push({ jid, name, hand: [] });
+
 
   const names = game.players.map(p => `@${p.name}`).join(', ');
   await sock.sendMessage(
@@ -1385,6 +1426,8 @@ if (lower === '!join') {
 }
 
 
+
+
 // --- Bhabhi: lobby status ----------------------------------------------------
 if (lower === '!bhabhi status') {
   const game = gamesByChat.get(from);
@@ -1396,6 +1439,7 @@ if (lower === '!bhabhi status') {
   await sock.sendMessage(from, { text: `Game: Bhabhi\nPhase: ${game.phase}\nPlayers: ${names}\nCommands: "!join", then host "!bdeal".`, mentions: game.players.map(p => p.jid) }, { quoted: msg });
   return;
 }
+
 
 // --- Bhabhi: end (hard stop) -------------------------------------------------
 if (lower === '!bhabhi end') {
@@ -1409,6 +1453,7 @@ if (lower === '!bhabhi end') {
   await sock.sendMessage(from, { text: 'Game ended.' }, { quoted: msg });
   return;
 }
+
 
 // --- Bhabhi: deal the deck and start the round --------------------------------
 if (lower === '!bdeal') {
@@ -1426,11 +1471,14 @@ if (lower === '!bdeal') {
     return;
   }
 
+
   // 1) build & shuffle deck
   const deck = shuffleInPlace(createDeck52());
 
+
   // 2) deal round-robin (helpers already clear hands & sort them)
   dealEvenlyRoundRobin(deck, game.players);
+
 
   // 3) choose a dealer and leader (leader = next seat after dealer)
   const dealerIdx = pickRandomDealerIdx(game.players.length);
@@ -1440,6 +1488,7 @@ if (lower === '!bdeal') {
   game.leadSuit = null;
   game.trick = [];
   game.discard = [];
+
 
   // 4) DM hands (sequential to be gentle on rate limits)
   // 4) DM hands (sequential, with clear acks + fallback)
@@ -1467,10 +1516,13 @@ if (lower === '!bdeal') {
   }
 
 
+
+
   // 5) Announce counts + dealer/leader in group
   const counts = game.players.map((p, i) =>
     `${i === dealerIdx ? '(Dealer) ' : ''}${i === leaderIdx ? '➡️ ' : ''}@${p.name}: ${p.hand.length}`
   ).join('\n');
+
 
   await sock.sendMessage(
     from,
@@ -1481,8 +1533,11 @@ if (lower === '!bdeal') {
     { quoted: msg }
   );
 
+
   return;
 }
+
+
 
 
 // --- Bhabhi: DM my current hand ---------------------------------------------
@@ -1510,6 +1565,8 @@ if (lower === '!hand') {
 }
 
 
+
+
 // --- Bhabhi: play a card -----------------------------------------------------
 if (lower.startsWith('!play')) {
   const game = gamesByChat.get(from);
@@ -1518,6 +1575,7 @@ if (lower.startsWith('!play')) {
     return;
   }
 
+
   // Extract caller seat
   const jid = getSenderJid(msg);
   const seatIdx = seatIndex(game, jid);
@@ -1525,6 +1583,7 @@ if (lower.startsWith('!play')) {
     await sock.sendMessage(from, { text: 'You are not seated in this game.' }, { quoted: msg });
     return;
   }
+
 
   // Parse card from text: allow forms like "7d", "10h", "QH", "q h"
   const parts = text.trim().split(/\s+/);
@@ -1544,6 +1603,7 @@ if (lower.startsWith('!play')) {
     return;
   }
 
+
   // Turn enforcement
   if (game.turnIndex !== seatIdx) {
     const whose = `@${game.players[game.turnIndex].name}`;
@@ -1551,12 +1611,14 @@ if (lower.startsWith('!play')) {
     return;
   }
 
+
   // Legality check (follow suit if can)
   const legal = isLegalPlay(game, seatIdx, card);
   if (!legal.ok) {
     await sock.sendMessage(from, { text: `Illegal move: ${legal.why}` }, { quoted: msg });
     return;
   }
+
 
   // On first card of a trick, set lead suit and capture who is expected to play this trick
   if (!game.trick || game.trick.length === 0) {
@@ -1568,6 +1630,7 @@ if (lower.startsWith('!play')) {
       .map(o => o.i);
   }
 
+
   // Apply move: remove from hand, push to trick
   const removed = removeCardFromHand(game.players[seatIdx].hand, card);
   if (!removed) {
@@ -1577,6 +1640,7 @@ if (lower.startsWith('!play')) {
   game.trick = game.trick || [];
   game.trick.push({ seatIdx, card });
 
+
   // Announce play & table
   const tableLine = formatTrickLine(game);
   await sock.sendMessage(
@@ -1584,6 +1648,7 @@ if (lower.startsWith('!play')) {
     { text: `@${game.players[seatIdx].name} played ${card}\nTable: ${tableLine}`, mentions: [game.players[seatIdx].jid] },
     { quoted: msg }
   );
+
 
   // Has the trick completed?
   const needed = (game.trickParticipants && game.trickParticipants.length) ? game.trickParticipants.length : game.players.filter(p => (p.hand && p.hand.length >= 0)).length;
@@ -1611,6 +1676,7 @@ if (lower.startsWith('!play')) {
       game.leadSuit = null;
     }
 
+
     // Check if round ended (all but one player empty means someone has cards; in Bhabhi, continue until a single holder?)
     const stillHolding = game.players.filter(p => (p.hand && p.hand.length > 0)).length;
     if (stillHolding <= 1) {
@@ -1630,6 +1696,7 @@ if (lower.startsWith('!play')) {
       return;
     }
 
+
     // Prompt next player (winner leads)
     const nextSeat = game.turnIndex;
     await sock.sendMessage(
@@ -1638,8 +1705,10 @@ if (lower.startsWith('!play')) {
       { quoted: msg }
     );
 
+
     return;
   }
+
 
   // Trick not yet complete → advance turn to next seat with cards
   const nextIdx = nextTurnIdx(game, seatIdx);
@@ -1651,6 +1720,8 @@ if (lower.startsWith('!play')) {
   );
   return;
 }
+
+
 
 
 // --- Admin debug (temporary) -------------------------------------------------
@@ -1666,6 +1737,7 @@ if (lower === '!admindebug') {
       .map(p => p.id);
     const adminsNorm = adminsRaw.map(normalizeJid);
 
+
     const callerRaw =
       msg?.key?.participant ||
       msg?.participant ||
@@ -1673,10 +1745,12 @@ if (lower === '!admindebug') {
       msg?.key?.remoteJid;
     const callerNorm = normalizeJid(callerRaw);
 
+
     const report =
       `Admins (raw):\n${adminsRaw.join('\n') || '(none)'}\n\n` +
       `Admins (norm):\n${adminsNorm.join('\n') || '(none)'}\n\n` +
       `Caller raw: ${callerRaw}\nCaller norm: ${callerNorm}`;
+
 
     await sock.sendMessage(from, { text: report }, { quoted: msg });
   } catch (e) {
@@ -1689,15 +1763,23 @@ if (lower === '!admindebug') {
 
 
 
-      
+
+
+
+
+     
       // Only chat if chat-mode is ON
       if (!isChatOn(from)) return;
+
+
+
 
 
 
       // normal LLM reply
       const replyText = await animeReply(text);
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
+
 
       // optional mood sticker
       const mood = detectReplyMood(replyText);
@@ -1716,7 +1798,13 @@ if (lower === '!admindebug') {
   });
 }
 
+
 start().catch((e) => {
   console.error('Fatal error:', e);
   process.exit(1);
 });
+
+
+
+
+
